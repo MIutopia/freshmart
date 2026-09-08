@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="订单">
+  <path d="M17 8h30v48l-7-5-8 5-8-5-7 5z" fill="currentColor" fill-opacity=".1"/>
+  <path d="M25 21h15M25 31h15M25 41h9"/>
+  <path d="m42 40 3 3 7-8"/>
+</svg>

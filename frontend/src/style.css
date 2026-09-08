@@ -1,0 +1,24 @@
+:root { font-family: Inter, "Microsoft YaHei", sans-serif; color: #173b2a; background: #f6f8f2; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.shell { max-width: 1120px; margin: 0 auto; padding: 28px 24px 42px; }
+.topbar, .role-tabs, footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 750; }
+.mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #1e8e57; color: #fff8e7; }
+.badge { color: #618170; font-size: 13px; }
+.intro { padding: 88px 0 54px; max-width: 720px; }
+.eyebrow { color: #ef6a4b; letter-spacing: 2px; font-size: 12px; font-weight: 700; }
+h1 { margin: 14px 0; font-size: clamp(36px, 6vw, 64px); line-height: 1.08; letter-spacing: 0; }
+.intro p:last-child { color: #618170; font-size: 17px; line-height: 1.7; }
+.role-tabs { justify-content: flex-start; border-bottom: 1px solid #d9e5d7; }
+.role-tabs button { border: 0; background: transparent; color: #618170; padding: 14px 4px; margin-right: 26px; font: inherit; cursor: pointer; }
+.role-tabs button.active { color: #1e8e57; border-bottom: 3px solid #1e8e57; font-weight: 700; }
+.module-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 28px 0 70px; }
+.module-card { min-height: 148px; background: #fff; border: 1px solid #e1e9df; border-radius: 8px; padding: 20px; }
+.dot { display: block; width: 10px; height: 10px; border-radius: 50%; background: #ffb547; }
+.module-card h2 { font-size: 17px; margin: 20px 0 8px; }
+.module-card p { color: #7b9282; font-size: 13px; line-height: 1.5; margin: 0; }
+footer { justify-content: flex-start; flex-wrap: wrap; color: #618170; font-size: 13px; }
+footer span { padding-right: 20px; border-right: 1px solid #c9d8c7; }
+footer span:last-child { border: 0; }
+@media (max-width: 760px) { .shell { padding: 20px 18px 30px; } .intro { padding: 60px 0 36px; } .module-grid { grid-template-columns: repeat(2, 1fr); } }

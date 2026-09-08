@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="配送">
+  <path d="M7 16h31v29H7zM38 25h11l8 9v11H38z" fill="currentColor" fill-opacity=".1"/>
+  <path d="M7 25h31M46 25v9h11M21 16v9M16 21h10"/>
+  <circle cx="18" cy="49" r="6" fill="currentColor"/><circle cx="47" cy="49" r="6" fill="currentColor"/>
+</svg>

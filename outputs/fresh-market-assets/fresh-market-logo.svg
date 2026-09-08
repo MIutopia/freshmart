@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 112" role="img" aria-labelledby="title desc">
+  <title id="title">鲜达生鲜商城</title>
+  <desc id="desc">由叶片和购物篮组成的生鲜果蔬配送商城标志</desc>
+  <g transform="translate(8 8)">
+    <rect width="96" height="96" rx="24" fill="#1E8E57"/>
+    <path d="M48 47C48 28 61 17 79 16c-1 19-12 31-31 31" fill="#B9E66B"/>
+    <path d="M48 47c9-10 17-17 27-25" fill="none" stroke="#1E8E57" stroke-width="4" stroke-linecap="round"/>
+    <path d="M25 49h46l-5 30a8 8 0 0 1-8 7H38a8 8 0 0 1-8-7z" fill="#FFF8E7"/>
+    <path d="M35 49c0-9 6-16 13-16s13 7 13 16" fill="none" stroke="#FFF8E7" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="39" cy="61" r="4" fill="#FFB547"/>
+    <circle cx="55" cy="61" r="4" fill="#EF6A4B"/>
+    <circle cx="47" cy="73" r="4" fill="#75B843"/>
+  </g>
+  <text x="126" y="59" fill="#173B2A" font-family="Microsoft YaHei, Arial, sans-serif" font-size="36" font-weight="700">鲜达生鲜</text>
+  <text x="128" y="84" fill="#618170" font-family="Arial, Microsoft YaHei, sans-serif" font-size="14" font-weight="600" letter-spacing="2">FRESH TO YOUR DOOR</text>
+</svg>

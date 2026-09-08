@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="数据看板">
+  <path d="M10 52V12h44v40z" fill="currentColor" fill-opacity=".1"/>
+  <path d="M19 43V33M31 43V22M43 43V28M17 43h29"/>
+  <path d="m18 26 11-8 10 5 8-8"/>
+  <circle cx="18" cy="26" r="2" fill="currentColor"/><circle cx="29" cy="18" r="2" fill="currentColor"/><circle cx="39" cy="23" r="2" fill="currentColor"/><circle cx="47" cy="15" r="2" fill="currentColor"/>
+</svg>
