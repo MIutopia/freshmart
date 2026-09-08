@@ -20,3 +20,15 @@ management:
 ai:
   gateway:
     base-url: ${AI_GATEWAY_BASE_URL:http://localhost:8090}
+commerce:
+  inventory-reservation-minutes: ${INVENTORY_RESERVATION_MINUTES:15}
+  freight:
+    free-threshold: ${FREIGHT_FREE_THRESHOLD:59.00}
+    standard-fee: ${FREIGHT_STANDARD_FEE:6.00}
+  weighing:
+    platform-absorb-limit: ${WEIGHING_ABSORB_LIMIT:1.00}
+  payment:
+    provider: WECHAT_PAY
+    mode: NATIVE
+  notification:
+    seasonal-card-channel: INBOX
