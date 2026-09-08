@@ -26,7 +26,7 @@ commerce:
     free-threshold: ${FREIGHT_FREE_THRESHOLD:59.00}
     standard-fee: ${FREIGHT_STANDARD_FEE:6.00}
   weighing:
-    platform-absorb-limit: ${WEIGHING_ABSORB_LIMIT:1.00}
+    platform-absorb-limit: ${WEIGHING_ABSORB_LIMIT:1.50}
   payment:
     provider: WECHAT_PAY
     mode: NATIVE
