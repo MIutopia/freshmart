@@ -1,6 +1,15 @@
 spring:
   application:
     name: freshmart-backend
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
+    username: ${DB_USERNAME:freshmart}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
 server:
   port: ${SERVER_PORT:8080}
 management:
