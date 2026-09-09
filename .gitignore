@@ -13,6 +13,8 @@ work/javac-check/
 work/gh-config/
 work/gh-auth.log
 work/gitconfig
+work/windows-root-ca.pem
+work/export-windows-ca.ps1
 
 # IDE and local secrets
 .idea/
