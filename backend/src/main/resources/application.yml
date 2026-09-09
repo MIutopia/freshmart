@@ -32,3 +32,11 @@ commerce:
     mode: NATIVE
   notification:
     seasonal-card-channel: INBOX
+  authentication:
+    mode: PASSWORD
+  market-price:
+    max-markup-rate: ${MARKET_PRICE_MAX_MARKUP_RATE:5.00}
+  commission:
+    default-rate: ${PLATFORM_COMMISSION_RATE:10.00}
+  refund:
+    default-window-minutes: ${REFUND_DEFAULT_WINDOW_MINUTES:1440}
