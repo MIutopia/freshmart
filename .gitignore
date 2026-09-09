@@ -10,6 +10,8 @@ frontend/.npm-cache/
 # Local Git metadata workaround for restricted workspace execution
 work/freshmart.git/
 work/javac-check/
+work/gh-config/
+work/gh-auth.log
 
 # IDE and local secrets
 .idea/
