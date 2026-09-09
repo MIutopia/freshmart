@@ -12,6 +12,7 @@ work/freshmart.git/
 work/javac-check/
 work/gh-config/
 work/gh-auth.log
+work/gitconfig
 
 # IDE and local secrets
 .idea/
