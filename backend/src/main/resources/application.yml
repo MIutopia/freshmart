@@ -21,6 +21,13 @@ ai:
   gateway:
     base-url: ${AI_GATEWAY_BASE_URL:http://localhost:8090}
 commerce:
+  capacity:
+    daily-order-target: ${CAPACITY_DAILY_ORDER_TARGET:50}
+    concurrent-user-target: ${CAPACITY_CONCURRENT_USER_TARGET:20}
+  media:
+    max-size-bytes: ${MEDIA_MAX_SIZE_BYTES:31457280}
+  batch:
+    near-expiry-days: ${BATCH_NEAR_EXPIRY_DAYS:3}
   inventory-reservation-minutes: ${INVENTORY_RESERVATION_MINUTES:15}
   freight:
     free-threshold: ${FREIGHT_FREE_THRESHOLD:59.00}
