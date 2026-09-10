@@ -319,36 +319,42 @@ CREATE TABLE IF NOT EXISTS freshmart_log.integration_outbox (
 
 INSERT IGNORE INTO freshmart_user.users (phone, login_name, password_hash, nickname, status)
 VALUES
-  ('13800001001', 'consumer-test-01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户01', 'ACTIVE'),
-  ('13800001002', 'consumer-test-02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户02', 'ACTIVE'),
-  ('13800001003', 'consumer-test-03', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户03', 'ACTIVE'),
-  ('13800001004', 'consumer-test-04', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户04', 'ACTIVE'),
-  ('13800001005', 'consumer-test-05', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户05', 'ACTIVE'),
-  ('13800001006', 'consumer-test-06', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户06', 'ACTIVE'),
-  ('13800001007', 'consumer-test-07', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户07', 'ACTIVE'),
-  ('13800001008', 'consumer-test-08', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户08', 'ACTIVE'),
-  ('13800001009', 'consumer-test-09', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户09', 'ACTIVE'),
-  ('13800001010', 'consumer-test-10', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试用户10', 'ACTIVE'),
-  ('13900001001', 'merchant-test-01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家01', 'ACTIVE'),
-  ('13900001002', 'merchant-test-02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家02', 'ACTIVE'),
-  ('13900001003', 'merchant-test-03', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家03', 'ACTIVE'),
-  ('13900001004', 'merchant-test-04', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家04', 'ACTIVE'),
-  ('13900001005', 'merchant-test-05', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家05', 'ACTIVE'),
-  ('13900001006', 'merchant-test-06', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家06', 'ACTIVE'),
-  ('13900001007', 'merchant-test-07', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家07', 'ACTIVE'),
-  ('13900001008', 'merchant-test-08', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家08', 'ACTIVE'),
-  ('13900001009', 'merchant-test-09', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家09', 'ACTIVE'),
-  ('13900001010', 'merchant-test-10', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试商家10', 'ACTIVE'),
-  ('13700001001', 'rider-test-01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员01', 'ACTIVE'),
-  ('13700001002', 'rider-test-02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员02', 'ACTIVE'),
-  ('13700001003', 'rider-test-03', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员03', 'ACTIVE'),
-  ('13700001004', 'rider-test-04', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员04', 'ACTIVE'),
-  ('13700001005', 'rider-test-05', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员05', 'ACTIVE'),
-  ('13700001006', 'rider-test-06', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员06', 'ACTIVE'),
-  ('13700001007', 'rider-test-07', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员07', 'ACTIVE'),
-  ('13700001008', 'rider-test-08', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员08', 'ACTIVE'),
-  ('13700001009', 'rider-test-09', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员09', 'ACTIVE'),
-  ('13700001010', 'rider-test-10', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '测试配送员10', 'ACTIVE');
+  ('13800001001', 'consumer-test-01', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户01', 'ACTIVE'),
+  ('13800001002', 'consumer-test-02', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户02', 'ACTIVE'),
+  ('13800001003', 'consumer-test-03', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户03', 'ACTIVE'),
+  ('13800001004', 'consumer-test-04', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户04', 'ACTIVE'),
+  ('13800001005', 'consumer-test-05', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户05', 'ACTIVE'),
+  ('13800001006', 'consumer-test-06', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户06', 'ACTIVE'),
+  ('13800001007', 'consumer-test-07', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户07', 'ACTIVE'),
+  ('13800001008', 'consumer-test-08', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户08', 'ACTIVE'),
+  ('13800001009', 'consumer-test-09', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户09', 'ACTIVE'),
+  ('13800001010', 'consumer-test-10', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户10', 'ACTIVE'),
+  ('13900001001', 'merchant-test-01', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家01', 'ACTIVE'),
+  ('13900001002', 'merchant-test-02', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家02', 'ACTIVE'),
+  ('13900001003', 'merchant-test-03', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家03', 'ACTIVE'),
+  ('13900001004', 'merchant-test-04', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家04', 'ACTIVE'),
+  ('13900001005', 'merchant-test-05', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家05', 'ACTIVE'),
+  ('13900001006', 'merchant-test-06', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家06', 'ACTIVE'),
+  ('13900001007', 'merchant-test-07', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家07', 'ACTIVE'),
+  ('13900001008', 'merchant-test-08', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家08', 'ACTIVE'),
+  ('13900001009', 'merchant-test-09', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家09', 'ACTIVE'),
+  ('13900001010', 'merchant-test-10', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试商家10', 'ACTIVE'),
+  ('13700001001', 'rider-test-01', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员01', 'ACTIVE'),
+  ('13700001002', 'rider-test-02', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员02', 'ACTIVE'),
+  ('13700001003', 'rider-test-03', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员03', 'ACTIVE'),
+  ('13700001004', 'rider-test-04', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员04', 'ACTIVE'),
+  ('13700001005', 'rider-test-05', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员05', 'ACTIVE'),
+  ('13700001006', 'rider-test-06', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员06', 'ACTIVE'),
+  ('13700001007', 'rider-test-07', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员07', 'ACTIVE'),
+  ('13700001008', 'rider-test-08', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员08', 'ACTIVE'),
+  ('13700001009', 'rider-test-09', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员09', 'ACTIVE'),
+  ('13700001010', 'rider-test-10', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试配送员10', 'ACTIVE');
+
+UPDATE freshmart_user.users
+SET password_hash = '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym'
+WHERE login_name LIKE 'consumer-test-%'
+   OR login_name LIKE 'merchant-test-%'
+   OR login_name LIKE 'rider-test-%';
 
 INSERT IGNORE INTO freshmart_user.user_role_assignments (user_id, role_code)
 SELECT id, 'CONSUMER'

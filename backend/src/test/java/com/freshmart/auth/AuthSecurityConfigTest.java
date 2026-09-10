@@ -18,6 +18,6 @@ class AuthSecurityConfigTest {
     @Test
     void localTestAccountHashMatchesDocumentedPassword() {
         PasswordEncoder encoder = new AuthSecurityConfig().passwordEncoder();
-        assertTrue(encoder.matches("password", "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"));
+        assertTrue(encoder.matches("password", "$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym"));
     }
 }
