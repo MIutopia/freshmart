@@ -10,6 +10,26 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     locations: classpath:db/migration
+storage:
+  datasource:
+    user:
+      url: ${USER_DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart_user?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
+      username: ${USER_DB_USERNAME:${DB_USERNAME:freshmart}}
+      password: ${USER_DB_PASSWORD:${DB_PASSWORD:}}
+      hikari:
+        maximum-pool-size: ${USER_DB_POOL_SIZE:5}
+    merchant:
+      url: ${MERCHANT_DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart_merchant?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
+      username: ${MERCHANT_DB_USERNAME:${DB_USERNAME:freshmart}}
+      password: ${MERCHANT_DB_PASSWORD:${DB_PASSWORD:}}
+      hikari:
+        maximum-pool-size: ${MERCHANT_DB_POOL_SIZE:5}
+    log:
+      url: ${LOG_DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart_log?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
+      username: ${LOG_DB_USERNAME:${DB_USERNAME:freshmart}}
+      password: ${LOG_DB_PASSWORD:${DB_PASSWORD:}}
+      hikari:
+        maximum-pool-size: ${LOG_DB_POOL_SIZE:3}
 server:
   port: ${SERVER_PORT:8080}
 auth:

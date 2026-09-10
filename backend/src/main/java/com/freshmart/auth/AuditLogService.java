@@ -1,13 +1,14 @@
 package com.freshmart.auth;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AuditLogService {
     private final JdbcTemplate jdbcTemplate;
 
-    public AuditLogService(JdbcTemplate jdbcTemplate) {
+    public AuditLogService(@Qualifier("logJdbcTemplate") JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 

@@ -5,6 +5,7 @@ import com.freshmart.auth.CurrentUser;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -14,20 +15,25 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 public class MerchantApplicationService {
-    private final JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate merchantJdbcTemplate;
+    private final JdbcTemplate userJdbcTemplate;
     private final AuditLogService auditLogService;
 
-    public MerchantApplicationService(JdbcTemplate jdbcTemplate, AuditLogService auditLogService) {
-        this.jdbcTemplate = jdbcTemplate;
+    public MerchantApplicationService(
+            @Qualifier("merchantJdbcTemplate") JdbcTemplate merchantJdbcTemplate,
+            @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate,
+            AuditLogService auditLogService) {
+        this.merchantJdbcTemplate = merchantJdbcTemplate;
+        this.userJdbcTemplate = userJdbcTemplate;
         this.auditLogService = auditLogService;
     }
 
-    @Transactional
+    @Transactional("merchantTransactionManager")
     public ApplicationView submit(CurrentUser user, String merchantName, String businessLicenseUrl, String sourceIp) {
         if (!user.hasRole("CONSUMER")) {
             throw new ResponseStatusException(BAD_REQUEST, "only consumer accounts can submit a merchant application");
         }
-        Long pendingCount = jdbcTemplate.queryForObject("""
+        Long pendingCount = merchantJdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM merchant_applications application
                 JOIN merchants merchant ON merchant.id = application.merchant_id
                 WHERE application.applicant_user_id = ? AND application.status = 'PENDING'
@@ -35,10 +41,10 @@ public class MerchantApplicationService {
         if (pendingCount != null && pendingCount > 0) {
             throw new ResponseStatusException(CONFLICT, "a merchant application is already pending review");
         }
-        jdbcTemplate.update("INSERT INTO merchants (owner_user_id, name, status) VALUES (?, ?, 'PENDING')",
+        merchantJdbcTemplate.update("INSERT INTO merchants (owner_user_id, name, status) VALUES (?, ?, 'PENDING')",
                 user.userId(), merchantName);
-        Long merchantId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        jdbcTemplate.update("""
+        Long merchantId = merchantJdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        merchantJdbcTemplate.update("""
                 INSERT INTO merchant_applications (merchant_id, applicant_user_id, business_license_url)
                 VALUES (?, ?, ?)
                 """, merchantId, user.userId(), businessLicenseUrl);
@@ -47,7 +53,7 @@ public class MerchantApplicationService {
     }
 
     public List<ApplicationView> list(String status) {
-        return jdbcTemplate.query("""
+        return merchantJdbcTemplate.query("""
                 SELECT application.id, application.merchant_id, merchant.name AS merchant_name,
                        application.applicant_user_id, application.business_license_url, application.status,
                        application.review_note, application.reviewed_by, application.reviewed_at, application.created_at
@@ -62,18 +68,18 @@ public class MerchantApplicationService {
                 resultSet.getObject("created_at", LocalDateTime.class)), status, status);
     }
 
-    @Transactional
+    @Transactional("merchantTransactionManager")
     public ApplicationView review(CurrentUser admin, Long merchantId, boolean approved, String reviewNote, String sourceIp) {
         ApplicationView application = findPendingByMerchantId(merchantId);
         String applicationStatus = approved ? "APPROVED" : "REJECTED";
         String merchantStatus = approved ? "ACTIVE" : "REJECTED";
-        jdbcTemplate.update("""
+        merchantJdbcTemplate.update("""
                 UPDATE merchant_applications SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """, applicationStatus, reviewNote, admin.userId(), application.applicationId());
-        jdbcTemplate.update("UPDATE merchants SET status = ? WHERE id = ?", merchantStatus, merchantId);
+        merchantJdbcTemplate.update("UPDATE merchants SET status = ? WHERE id = ?", merchantStatus, merchantId);
         if (approved) {
-            jdbcTemplate.update("INSERT IGNORE INTO user_role_assignments (user_id, role_code) VALUES (?, 'MERCHANT')",
+            userJdbcTemplate.update("INSERT IGNORE INTO user_role_assignments (user_id, role_code) VALUES (?, 'MERCHANT')",
                     application.applicantUserId());
         }
         auditLogService.record(admin.userId(), approved ? "MERCHANT_APPLICATION_APPROVED" : "MERCHANT_APPLICATION_REJECTED",
@@ -82,7 +88,7 @@ public class MerchantApplicationService {
     }
 
     private ApplicationView findPendingByMerchantId(Long merchantId) {
-        return jdbcTemplate.query("""
+        return merchantJdbcTemplate.query("""
                 SELECT application.id, application.merchant_id, merchant.name AS merchant_name,
                        application.applicant_user_id, application.business_license_url, application.status,
                        application.review_note, application.reviewed_by, application.reviewed_at, application.created_at
@@ -98,7 +104,7 @@ public class MerchantApplicationService {
     }
 
     private ApplicationView findByMerchantId(Long merchantId) {
-        return jdbcTemplate.query("""
+        return merchantJdbcTemplate.query("""
                 SELECT application.id, application.merchant_id, merchant.name AS merchant_name,
                        application.applicant_user_id, application.business_license_url, application.status,
                        application.review_note, application.reviewed_by, application.reviewed_at, application.created_at
