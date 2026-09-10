@@ -14,4 +14,10 @@ class AuthSecurityConfigTest {
         assertTrue(encoder.matches("freshmart-local-password", encoded));
         assertFalse(encoder.matches("incorrect-password", encoded));
     }
+
+    @Test
+    void localTestAccountHashMatchesDocumentedPassword() {
+        PasswordEncoder encoder = new AuthSecurityConfig().passwordEncoder();
+        assertTrue(encoder.matches("password", "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"));
+    }
 }
