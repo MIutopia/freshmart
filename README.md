@@ -44,6 +44,10 @@ npm run dev
 - 数据库密码、微信支付密钥和模型密钥只通过本地环境变量注入，不提交到 Git。
 - 首期只建设网页端：用户 `/app`、商家 `/merchant`、配送 `/delivery`、管理后台 `/admin`。
 
+## 自动构建与部署
+
+GitHub Actions 在 Pull Request 和 `main` 推送时自动构建、测试后端与前端。生产发布通过 GitHub Environment 的显式开关和 SSH 密钥配置执行，详见 `docs/CI-CD部署说明.md`。
+
 ## 下一步确认
 
 请优先确认 `docs/待确认问题.md` 中的 P0 问题。它们会直接影响数据库模型、订单状态和结算实现。
