@@ -12,6 +12,8 @@ spring:
     locations: classpath:db/migration
 server:
   port: ${SERVER_PORT:8080}
+auth:
+  session-hours: ${AUTH_SESSION_HOURS:8}
 management:
   endpoints:
     web:
