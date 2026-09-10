@@ -35,8 +35,8 @@ commerce:
   weighing:
     platform-absorb-limit: ${WEIGHING_ABSORB_LIMIT:1.50}
   payment:
-    provider: WECHAT_PAY
-    mode: NATIVE
+    provider: ${PAYMENT_PROVIDER:SIMULATED}
+    mode: ${PAYMENT_MODE:SIMULATED}
   notification:
     seasonal-card-channel: INBOX
   authentication:
