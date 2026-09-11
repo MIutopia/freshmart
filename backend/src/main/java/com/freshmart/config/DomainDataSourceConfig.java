@@ -89,6 +89,11 @@ public class DomainDataSourceConfig {
         return new JdbcTemplate(dataSource);
     }
 
+    @Bean("deliveryTransactionManager")
+    PlatformTransactionManager deliveryTransactionManager(@Qualifier("deliveryDataSource") DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+
     @Bean
     @ConfigurationProperties("storage.datasource.log")
     DataSourceProperties logDataSourceProperties() {
