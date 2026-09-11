@@ -63,6 +63,7 @@ commerce:
   batch:
     near-expiry-days: ${BATCH_NEAR_EXPIRY_DAYS:3}
   inventory-reservation-minutes: ${INVENTORY_RESERVATION_MINUTES:15}
+  inventory-release-interval-ms: ${INVENTORY_RELEASE_INTERVAL_MS:60000}
   freight:
     free-threshold: ${FREIGHT_FREE_THRESHOLD:59.00}
     standard-fee: ${FREIGHT_STANDARD_FEE:6.00}
