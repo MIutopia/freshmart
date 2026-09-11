@@ -3,6 +3,7 @@ package com.freshmart.marketing;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freshmart.auth.CurrentUser;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 
 @Service
@@ -39,6 +41,55 @@ public class MarketingService {
                 VALUES (?, ?, ?, CAST(? AS JSON), ?, ?, ?)
                 """, merchantId, promotionType, name, json(rule), startsAt, endsAt, stackable);
         return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    @Transactional("merchantTransactionManager")
+    public long createCoupon(CurrentUser user, String name, String couponType, BigDecimal thresholdAmount,
+            BigDecimal discountAmount, LocalDateTime startsAt, LocalDateTime endsAt, int totalQuantity) {
+        long merchantId = requireActiveMerchant(user);
+        if (name == null || name.isBlank() || couponType == null || couponType.isBlank()
+                || thresholdAmount == null || thresholdAmount.signum() < 0
+                || discountAmount == null || discountAmount.signum() <= 0
+                || totalQuantity <= 0 || startsAt == null || endsAt == null || !endsAt.isAfter(startsAt)) {
+            throw new ResponseStatusException(BAD_REQUEST, "coupon fields are invalid");
+        }
+        if (!"FIXED".equalsIgnoreCase(couponType) && !"FULL_REDUCTION".equalsIgnoreCase(couponType)) {
+            throw new ResponseStatusException(BAD_REQUEST, "coupon type must be FIXED or FULL_REDUCTION");
+        }
+        if (discountAmount.compareTo(thresholdAmount) > 0 && thresholdAmount.signum() > 0) {
+            throw new ResponseStatusException(BAD_REQUEST, "discount cannot exceed coupon threshold");
+        }
+        jdbcTemplate.update("""
+                INSERT INTO coupons (merchant_id, name, coupon_type, threshold_amount, discount_amount,
+                                     starts_at, ends_at, total_quantity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, merchantId, name.trim(), couponType.toUpperCase(), thresholdAmount, discountAmount,
+                startsAt, endsAt, totalQuantity);
+        return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    @Transactional("merchantTransactionManager")
+    public long createMembershipLevel(CurrentUser admin, String name, int minPoints, BigDecimal discountRate) {
+        if (name == null || name.isBlank() || minPoints < 0 || discountRate == null
+                || discountRate.compareTo(BigDecimal.ZERO) < 0 || discountRate.compareTo(BigDecimal.valueOf(100)) > 0) {
+            throw new ResponseStatusException(BAD_REQUEST, "membership level fields are invalid");
+        }
+        try {
+            jdbcTemplate.update("INSERT INTO membership_levels (name, min_points, discount_rate) VALUES (?, ?, ?)",
+                    name.trim(), minPoints, discountRate);
+        } catch (org.springframework.dao.DuplicateKeyException exception) {
+            throw new ResponseStatusException(CONFLICT, "membership level name already exists");
+        }
+        return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private long requireActiveMerchant(CurrentUser user) {
+        Long merchantId = jdbcTemplate.query("SELECT id FROM merchants WHERE owner_user_id = ? AND status = 'ACTIVE'",
+                (rs, row) -> rs.getLong(1), user.userId()).stream().findFirst().orElse(null);
+        if (merchantId == null) {
+            throw new ResponseStatusException(FORBIDDEN, "active merchant profile is required");
+        }
+        return merchantId;
     }
 
     private String json(Object value) {

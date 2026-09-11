@@ -26,25 +26,31 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @Service
 public class TradeService {
     private final JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate userJdbcTemplate;
     private final ObjectMapper objectMapper;
     private final int reservationMinutes;
     private final BigDecimal freeFreightThreshold;
     private final BigDecimal standardFreight;
     private final BigDecimal maxMarkupRate;
+    private final BigDecimal pointsPerCurrency;
 
     public TradeService(
             @Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
+            @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate,
             ObjectMapper objectMapper,
             @Value("${commerce.inventory-reservation-minutes:15}") int reservationMinutes,
             @Value("${commerce.freight.free-threshold:59.00}") BigDecimal freeFreightThreshold,
             @Value("${commerce.freight.standard-fee:6.00}") BigDecimal standardFreight,
-            @Value("${commerce.market-price.max-markup-rate:5.00}") BigDecimal maxMarkupRate) {
+            @Value("${commerce.market-price.max-markup-rate:5.00}") BigDecimal maxMarkupRate,
+            @Value("${commerce.points-per-currency:1.00}") BigDecimal pointsPerCurrency) {
         this.jdbcTemplate = jdbcTemplate;
+        this.userJdbcTemplate = userJdbcTemplate;
         this.objectMapper = objectMapper;
         this.reservationMinutes = reservationMinutes;
         this.freeFreightThreshold = freeFreightThreshold;
         this.standardFreight = standardFreight;
         this.maxMarkupRate = maxMarkupRate;
+        this.pointsPerCurrency = pointsPerCurrency;
     }
 
     @Transactional("tradeTransactionManager")
@@ -192,7 +198,22 @@ public class TradeService {
                 INSERT INTO fee_ledgers (trade_id, fee_type, amount, direction, reference_type, reference_id, idempotency_key)
                 VALUES (?, 'USER_PAYMENT', ?, 'CREDIT', 'TRADE', ?, ?)
                 """, trade.id(), trade.payableAmount(), trade.tradeNo(), "PAYMENT-" + trade.tradeNo());
+        awardPoints(trade);
         return findById(trade.id());
+    }
+
+    private void awardPoints(TradeView trade) {
+        int points = com.freshmart.marketing.PointsCalculator.awardablePoints(trade.payableAmount(), pointsPerCurrency);
+        if (points <= 0) {
+            return;
+        }
+        Integer balance = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (rs, row) -> rs.getInt(1), trade.userId()).stream().findFirst().orElse(0);
+        int newBalance = Math.addExact(balance, points);
+        userJdbcTemplate.update("""
+                INSERT IGNORE INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
+                VALUES (?, ?, ?, ?, 'TRADE_PAYMENT', ?)
+                """, trade.userId(), trade.id(), points, newBalance, "POINTS-" + trade.tradeNo());
     }
 
     private ProductWarehouse findProductWarehouse(long productId, long deliveryZoneId) {

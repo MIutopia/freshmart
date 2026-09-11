@@ -85,3 +85,4 @@ commerce:
   delivery:
     accept-timeout-minutes: ${DELIVERY_ACCEPT_TIMEOUT_MINUTES:5}
     timeout-scan-interval-ms: ${DELIVERY_TIMEOUT_SCAN_INTERVAL_MS:60000}
+  points-per-currency: ${POINTS_PER_CURRENCY:1.00}
