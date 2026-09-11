@@ -28,6 +28,11 @@ public class DomainDataSourceConfig {
         return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
     }
 
+    @Bean("coreJdbcTemplate")
+    JdbcTemplate coreJdbcTemplate(@Qualifier("dataSource") DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
     @Bean
     @ConfigurationProperties("storage.datasource.user")
     DataSourceProperties userDataSourceProperties() {

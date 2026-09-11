@@ -6,6 +6,7 @@ import com.freshmart.auth.CurrentUser;
 import com.freshmart.order.FreightCalculator;
 import com.freshmart.order.MarketPriceSettlementPolicy;
 import com.freshmart.marketing.PromotionCalculator;
+import com.freshmart.platform.PlatformRuleService;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -33,6 +34,7 @@ public class TradeService {
     private final JdbcTemplate userJdbcTemplate;
     private final JdbcTemplate merchantJdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final PlatformRuleService platformRuleService;
     private final int reservationMinutes;
     private final BigDecimal freeFreightThreshold;
     private final BigDecimal standardFreight;
@@ -44,6 +46,7 @@ public class TradeService {
             @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate,
             @Qualifier("merchantJdbcTemplate") JdbcTemplate merchantJdbcTemplate,
             ObjectMapper objectMapper,
+            PlatformRuleService platformRuleService,
             @Value("${commerce.inventory-reservation-minutes:15}") int reservationMinutes,
             @Value("${commerce.freight.free-threshold:59.00}") BigDecimal freeFreightThreshold,
             @Value("${commerce.freight.standard-fee:6.00}") BigDecimal standardFreight,
@@ -53,6 +56,7 @@ public class TradeService {
         this.userJdbcTemplate = userJdbcTemplate;
         this.merchantJdbcTemplate = merchantJdbcTemplate;
         this.objectMapper = objectMapper;
+        this.platformRuleService = platformRuleService;
         this.reservationMinutes = reservationMinutes;
         this.freeFreightThreshold = freeFreightThreshold;
         this.standardFreight = standardFreight;
@@ -79,6 +83,10 @@ public class TradeService {
         if (requestedLines == null || requestedLines.isEmpty()) {
             throw new ResponseStatusException(BAD_REQUEST, "at least one checkout line is required");
         }
+        int reservationMinutes = platformRuleService.integerOrDefault("inventory.reservation.minutes", this.reservationMinutes);
+        BigDecimal freeFreightThreshold = platformRuleService.decimalOrDefault("freight.free.threshold", this.freeFreightThreshold);
+        BigDecimal standardFreight = platformRuleService.decimalOrDefault("freight.standard.fee", this.standardFreight);
+        BigDecimal maxMarkupRate = platformRuleService.decimalOrDefault("product.market.price.max.markup.rate", this.maxMarkupRate);
         LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(reservationMinutes);
         Map<Long, List<PricedLine>> merchantLines = new LinkedHashMap<>();
         Map<Long, Long> merchantWarehouseIds = new LinkedHashMap<>();
@@ -283,6 +291,7 @@ public class TradeService {
     }
 
     private void awardPoints(TradeView trade) {
+        BigDecimal pointsPerCurrency = platformRuleService.decimalOrDefault("points.per.currency", this.pointsPerCurrency);
         int points = com.freshmart.marketing.PointsCalculator.awardablePoints(trade.payableAmount(), pointsPerCurrency);
         if (points <= 0) {
             return;
