@@ -161,6 +161,32 @@ CREATE TABLE IF NOT EXISTS freshmart_merchant.inventory_batches (
   CONSTRAINT fk_batch_warehouse FOREIGN KEY (warehouse_id) REFERENCES freshmart_merchant.warehouses(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_merchant.warehouse_operable_categories (
+  warehouse_id BIGINT NOT NULL,
+  category_id BIGINT NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (warehouse_id, category_id),
+  CONSTRAINT fk_warehouse_category_warehouse FOREIGN KEY (warehouse_id) REFERENCES freshmart_merchant.warehouses(id),
+  CONSTRAINT fk_warehouse_category_category FOREIGN KEY (category_id) REFERENCES freshmart_merchant.product_categories(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_merchant.merchant_category_warehouse_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  merchant_id BIGINT NOT NULL,
+  category_id BIGINT NOT NULL,
+  warehouse_id BIGINT NOT NULL,
+  priority INT NOT NULL DEFAULT 100,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_category_warehouse_rule (merchant_id, category_id, warehouse_id),
+  KEY idx_category_warehouse_rule (merchant_id, category_id, status, priority),
+  CONSTRAINT fk_category_rule_merchant FOREIGN KEY (merchant_id) REFERENCES freshmart_merchant.merchants(id),
+  CONSTRAINT fk_category_rule_category FOREIGN KEY (category_id) REFERENCES freshmart_merchant.product_categories(id),
+  CONSTRAINT fk_category_rule_warehouse FOREIGN KEY (warehouse_id) REFERENCES freshmart_merchant.warehouses(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_delivery.delivery_zones (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(80) NOT NULL,
@@ -319,6 +345,7 @@ CREATE TABLE IF NOT EXISTS freshmart_log.integration_outbox (
 
 INSERT IGNORE INTO freshmart_user.users (phone, login_name, password_hash, nickname, status)
 VALUES
+  ('13600001001', 'admin-test-01', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '本地测试管理员', 'ACTIVE'),
   ('13800001001', 'consumer-test-01', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户01', 'ACTIVE'),
   ('13800001002', 'consumer-test-02', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户02', 'ACTIVE'),
   ('13800001003', 'consumer-test-03', '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Ym', '测试用户03', 'ACTIVE'),
@@ -355,6 +382,11 @@ SET password_hash = '$2a$10$p/T1yo6nQC4vyFvYV7hHm.B.5dfw9s1GUwqAJnzs/ZDiyPi.Yb1Y
 WHERE login_name LIKE 'consumer-test-%'
    OR login_name LIKE 'merchant-test-%'
    OR login_name LIKE 'rider-test-%';
+
+INSERT IGNORE INTO freshmart_user.user_role_assignments (user_id, role_code)
+SELECT id, 'ADMIN'
+FROM freshmart_user.users
+WHERE login_name = 'admin-test-01';
 
 INSERT IGNORE INTO freshmart_user.user_role_assignments (user_id, role_code)
 SELECT id, 'CONSUMER'

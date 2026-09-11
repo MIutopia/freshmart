@@ -73,6 +73,23 @@ public class DomainDataSourceConfig {
     }
 
     @Bean
+    @ConfigurationProperties("storage.datasource.delivery")
+    DataSourceProperties deliveryDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean("deliveryDataSource")
+    @ConfigurationProperties("storage.datasource.delivery.hikari")
+    HikariDataSource deliveryDataSource(@Qualifier("deliveryDataSourceProperties") DataSourceProperties properties) {
+        return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
+    }
+
+    @Bean("deliveryJdbcTemplate")
+    JdbcTemplate deliveryJdbcTemplate(@Qualifier("deliveryDataSource") DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
+    @Bean
     @ConfigurationProperties("storage.datasource.log")
     DataSourceProperties logDataSourceProperties() {
         return new DataSourceProperties();

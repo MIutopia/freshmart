@@ -24,6 +24,12 @@ storage:
       password: ${MERCHANT_DB_PASSWORD:${DB_PASSWORD:}}
       hikari:
         maximum-pool-size: ${MERCHANT_DB_POOL_SIZE:5}
+    delivery:
+      url: ${DELIVERY_DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart_delivery?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
+      username: ${DELIVERY_DB_USERNAME:${DB_USERNAME:freshmart}}
+      password: ${DELIVERY_DB_PASSWORD:${DB_PASSWORD:}}
+      hikari:
+        maximum-pool-size: ${DELIVERY_DB_POOL_SIZE:3}
     log:
       url: ${LOG_DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart_log?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
       username: ${LOG_DB_USERNAME:${DB_USERNAME:freshmart}}
