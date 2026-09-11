@@ -175,7 +175,8 @@ public class TradeService {
                         """, orderId, line.product().productId(), line.product().name(), warehouseId, line.weightGrams(),
                         line.product().marketPricePerKg(), line.product().merchantPricePerKg(), line.price().userPricePerKilogram(),
                         line.price().merchantGrossAmount(), line.price().userGoodsAmount(), line.price().platformSubsidyAmount());
-                reserveBatches(tradeId, orderId, line.product().productId(), warehouseId, line.weightGrams(), expiresAt);
+                long orderItemId = lastInsertId();
+                reserveBatches(tradeId, orderId, orderItemId, line.product().productId(), warehouseId, line.weightGrams(), expiresAt);
             }
         }
         if (!reserveCoupons(user.userId(), tradeId, couponIds)) {
@@ -248,10 +249,10 @@ public class TradeService {
             throw new ResponseStatusException(CONFLICT, "inventory reservation has expired");
         }
         List<Reservation> reservations = jdbcTemplate.query("""
-                SELECT id, product_id, batch_id, reserved_grams FROM inventory_reservations
+                SELECT id, order_id, order_item_id, product_id, batch_id, warehouse_id, reserved_grams FROM inventory_reservations
                 WHERE trade_id = ? AND status = 'ACTIVE' FOR UPDATE
-                """, (rs, row) -> new Reservation(rs.getLong("id"), rs.getLong("product_id"),
-                rs.getLong("batch_id"), rs.getInt("reserved_grams")), trade.id());
+                """, (rs, row) -> new Reservation(rs.getLong("id"), rs.getLong("order_id"), rs.getLong("order_item_id"),
+                rs.getLong("product_id"), rs.getLong("batch_id"), rs.getLong("warehouse_id"), rs.getInt("reserved_grams")), trade.id());
         if (reservations.isEmpty()) {
             throw new ResponseStatusException(CONFLICT, "no active inventory reservation found");
         }
@@ -265,6 +266,10 @@ public class TradeService {
             if (updated == 0) {
                 throw new ResponseStatusException(CONFLICT, "reserved inventory is no longer available");
             }
+            jdbcTemplate.update("""
+                    INSERT INTO order_item_batch_allocations (order_item_id, batch_id, warehouse_id, allocated_grams)
+                    VALUES (?, ?, ?, ?)
+                    """, reservation.orderItemId(), reservation.batchId(), reservation.warehouseId(), reservation.grams());
         }
         jdbcTemplate.update("UPDATE inventory_reservations SET status = 'CONSUMED' WHERE trade_id = ? AND status = 'ACTIVE'", trade.id());
         jdbcTemplate.update("UPDATE trade_orders SET status = 'PAID' WHERE id = ?", trade.id());
@@ -378,7 +383,7 @@ public class TradeService {
                 .stream().findFirst().orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "active product warehouse rule not found"));
     }
 
-    private void reserveBatches(long tradeId, long orderId, long productId, long warehouseId, int grams, LocalDateTime expiresAt) {
+    private void reserveBatches(long tradeId, long orderId, long orderItemId, long productId, long warehouseId, int grams, LocalDateTime expiresAt) {
         int remaining = grams;
         List<Batch> batches = jdbcTemplate.query("""
                 SELECT id, available_grams, reserved_grams FROM freshmart_merchant.inventory_batches
@@ -398,9 +403,9 @@ public class TradeService {
                 throw new ResponseStatusException(CONFLICT, "inventory changed while reserving");
             }
             jdbcTemplate.update("""
-                    INSERT INTO inventory_reservations (trade_id, order_id, product_id, batch_id, reserved_grams, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """, tradeId, orderId, productId, batch.id(), allocated, expiresAt);
+                    INSERT INTO inventory_reservations (trade_id, order_id, order_item_id, product_id, batch_id, warehouse_id, reserved_grams, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, tradeId, orderId, orderItemId, productId, batch.id(), warehouseId, allocated, expiresAt);
             remaining -= allocated;
         }
         if (remaining > 0) {
@@ -477,7 +482,8 @@ public class TradeService {
     private record Batch(long id, int availableGrams, int reservedGrams) {
     }
 
-    private record Reservation(long id, long productId, long batchId, int grams) {
+    private record Reservation(long id, long orderId, long orderItemId, long productId, long batchId,
+            long warehouseId, int grams) {
     }
 
     private record Coupon(long id, Long merchantId, String couponType, BigDecimal thresholdAmount, BigDecimal discountAmount) {

@@ -365,19 +365,41 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.order_items (
   KEY idx_order_item_product (product_id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_trade.order_item_batch_allocations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_item_id BIGINT NOT NULL,
+  batch_id BIGINT NOT NULL,
+  warehouse_id BIGINT NOT NULL,
+  allocated_grams INT NOT NULL,
+  allocated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_item_batch_allocation (order_item_id, batch_id),
+  KEY idx_allocation_order_item (order_item_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.electronic_receipts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_id BIGINT NOT NULL UNIQUE,
+  receipt_no VARCHAR(40) NOT NULL UNIQUE,
+  receipt_snapshot JSON NOT NULL,
+  issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_trade.inventory_reservations (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   trade_id BIGINT NOT NULL,
   order_id BIGINT NOT NULL,
+  order_item_id BIGINT NOT NULL,
   product_id BIGINT NOT NULL,
   batch_id BIGINT NOT NULL,
+  warehouse_id BIGINT NOT NULL,
   reserved_grams INT NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
   expires_at DATETIME NOT NULL,
   released_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_reservation_expiration (status, expires_at),
-  KEY idx_reservation_trade (trade_id)
+  KEY idx_reservation_trade (trade_id),
+  KEY idx_reservation_order_item (order_item_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
