@@ -95,6 +95,28 @@ public class DomainDataSourceConfig {
     }
 
     @Bean
+    @ConfigurationProperties("storage.datasource.trade")
+    DataSourceProperties tradeDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean("tradeDataSource")
+    @ConfigurationProperties("storage.datasource.trade.hikari")
+    HikariDataSource tradeDataSource(@Qualifier("tradeDataSourceProperties") DataSourceProperties properties) {
+        return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
+    }
+
+    @Bean("tradeJdbcTemplate")
+    JdbcTemplate tradeJdbcTemplate(@Qualifier("tradeDataSource") DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
+    @Bean("tradeTransactionManager")
+    PlatformTransactionManager tradeTransactionManager(@Qualifier("tradeDataSource") DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+
+    @Bean
     @ConfigurationProperties("storage.datasource.log")
     DataSourceProperties logDataSourceProperties() {
         return new DataSourceProperties();

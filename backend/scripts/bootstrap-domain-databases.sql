@@ -272,6 +272,39 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.orders (
   KEY idx_order_merchant_status (merchant_id, status)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_trade.order_items (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  product_name_snapshot VARCHAR(160) NOT NULL,
+  warehouse_id BIGINT NOT NULL,
+  weight_grams INT NOT NULL,
+  market_price_per_kg DECIMAL(10,2) NOT NULL,
+  merchant_price_per_kg DECIMAL(10,2) NOT NULL,
+  user_price_per_kg DECIMAL(10,2) NOT NULL,
+  merchant_gross_amount DECIMAL(10,2) NOT NULL,
+  user_goods_amount DECIMAL(10,2) NOT NULL,
+  platform_price_subsidy_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_order_item_order (order_id),
+  KEY idx_order_item_product (product_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.inventory_reservations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  trade_id BIGINT NOT NULL,
+  order_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  batch_id BIGINT NOT NULL,
+  reserved_grams INT NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+  expires_at DATETIME NOT NULL,
+  released_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_reservation_expiration (status, expires_at),
+  KEY idx_reservation_trade (trade_id)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   payment_no VARCHAR(40) NOT NULL UNIQUE,
@@ -279,6 +312,7 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
   provider VARCHAR(24) NOT NULL,
   payment_mode VARCHAR(16) NOT NULL,
   provider_transaction_id VARCHAR(64) NULL UNIQUE,
+  code_url VARCHAR(512) NULL,
   amount DECIMAL(10,2) NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
   idempotency_key VARCHAR(80) NOT NULL UNIQUE,
