@@ -51,6 +51,12 @@ public class TradeController {
         return tradeService.confirmSimulatedPayment(user, tradeNo);
     }
 
+    @PostMapping("/api/payments/{tradeNo}/confirm-balance")
+    @PreAuthorize("hasRole('CONSUMER')")
+    public TradeService.TradeView confirmBalancePayment(@AuthenticationPrincipal CurrentUser user, @PathVariable String tradeNo) {
+        return tradeService.confirmBalancePayment(user, tradeNo);
+    }
+
     public record CreateTradeRequest(@Positive long deliveryZoneId, @NotNull Map<String, Object> addressSnapshot,
             @NotEmpty List<@Valid CheckoutLineRequest> lines, List<@Positive Long> couponIds) {
     }

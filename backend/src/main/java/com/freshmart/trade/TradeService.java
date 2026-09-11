@@ -199,6 +199,38 @@ public class TradeService {
 
     @Transactional("tradeTransactionManager")
     public TradeView confirmSimulatedPayment(CurrentUser user, String tradeNo) {
+        return settlePaidTrade(user, tradeNo);
+    }
+
+    @Transactional("tradeTransactionManager")
+    public TradeView confirmBalancePayment(CurrentUser user, String tradeNo) {
+        TradeView trade = requireOwnedPendingTrade(user, tradeNo);
+        if (trade.reservationExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new ResponseStatusException(CONFLICT, "inventory reservation has expired");
+        }
+        int deducted = userJdbcTemplate.update("""
+                UPDATE wallet_accounts SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND status = 'ACTIVE' AND balance >= ?
+                """, trade.payableAmount(), user.userId(), trade.payableAmount());
+        if (deducted == 0) {
+            throw new ResponseStatusException(CONFLICT, "insufficient wallet balance");
+        }
+        try {
+            BigDecimal balance = userJdbcTemplate.query("SELECT balance FROM wallet_accounts WHERE user_id = ?",
+                    (rs, row) -> rs.getBigDecimal(1), user.userId()).stream().findFirst().orElse(BigDecimal.ZERO);
+            userJdbcTemplate.update("""
+                    INSERT INTO wallet_transactions (wallet_id, trade_id, transaction_type, amount, balance_after, idempotency_key)
+                    SELECT id, ?, 'PAYMENT', ?, ?, ? FROM wallet_accounts WHERE user_id = ?
+                    """, trade.id(), trade.payableAmount().negate(), balance, "BALANCE-" + trade.tradeNo(), user.userId());
+            return settlePaidTrade(user, tradeNo);
+        } catch (RuntimeException exception) {
+            userJdbcTemplate.update("UPDATE wallet_accounts SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                    trade.payableAmount(), user.userId());
+            throw exception;
+        }
+    }
+
+    private TradeView settlePaidTrade(CurrentUser user, String tradeNo) {
         TradeView trade = requireOwnedPendingTrade(user, tradeNo);
         if (trade.reservationExpiresAt().isBefore(LocalDateTime.now())) {
             throw new ResponseStatusException(CONFLICT, "inventory reservation has expired");
