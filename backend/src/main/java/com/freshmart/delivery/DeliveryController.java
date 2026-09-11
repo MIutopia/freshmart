@@ -4,6 +4,7 @@ import com.freshmart.auth.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -19,13 +20,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Value;
 
 @RestController
 public class DeliveryController {
     private final DeliveryService deliveryService;
+    private final int acceptTimeoutMinutes;
 
-    public DeliveryController(DeliveryService deliveryService) {
+    public DeliveryController(DeliveryService deliveryService,
+            @Value("${commerce.delivery.accept-timeout-minutes:5}") int acceptTimeoutMinutes) {
         this.deliveryService = deliveryService;
+        this.acceptTimeoutMinutes = acceptTimeoutMinutes;
     }
 
     @PostMapping("/api/admin/delivery-zones")
@@ -63,8 +68,39 @@ public class DeliveryController {
         return deliveryService.listMyPerformance(rider, from, to);
     }
 
+    @PostMapping("/api/admin/delivery-tasks/{taskId}/assign")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('ADMIN')")
+    public void assign(@PathVariable long taskId, @Valid @RequestBody AssignRequest request) {
+        deliveryService.assign(taskId, request.riderUserId(), acceptTimeoutMinutes);
+    }
+
+    @PutMapping("/api/delivery/tasks/{taskId}/accept")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('RIDER')")
+    public void accept(@AuthenticationPrincipal CurrentUser rider, @PathVariable long taskId) {
+        deliveryService.accept(rider, taskId);
+    }
+
+    @PutMapping("/api/delivery/tasks/{taskId}/pick")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('RIDER')")
+    public void pick(@AuthenticationPrincipal CurrentUser rider, @PathVariable long taskId) {
+        deliveryService.pick(rider, taskId);
+    }
+
+    @PutMapping("/api/delivery/tasks/{taskId}/deliver")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('RIDER')")
+    public void deliver(@AuthenticationPrincipal CurrentUser rider, @PathVariable long taskId,
+            @Valid @RequestBody DeliverRequest request) {
+        deliveryService.deliver(rider, taskId, request.proofUrl());
+    }
+
     public record IdResponse(long id) { }
     public record CreateZoneRequest(@NotBlank String name, @NotBlank String areaCode, String boundaryJson) { }
     public record UpdateZoneRequest(@NotBlank String name, String boundaryJson,
             @Pattern(regexp = "ACTIVE|INACTIVE") String status) { }
+    public record AssignRequest(@Positive long riderUserId) { }
+    public record DeliverRequest(@NotBlank String proofUrl) { }
 }
