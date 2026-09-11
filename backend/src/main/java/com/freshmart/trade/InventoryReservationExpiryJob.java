@@ -10,9 +10,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class InventoryReservationExpiryJob {
     private final JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate userJdbcTemplate;
 
-    public InventoryReservationExpiryJob(@Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate) {
+    public InventoryReservationExpiryJob(@Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
+            @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+        this.userJdbcTemplate = userJdbcTemplate;
     }
 
     @Scheduled(fixedDelayString = "${commerce.inventory-release-interval-ms:60000}")
@@ -44,6 +47,10 @@ public class InventoryReservationExpiryJob {
                 jdbcTemplate.update("UPDATE trade_orders SET status = 'CANCELLED' WHERE id = ? AND status = 'PENDING_PAYMENT'", tradeId);
                 jdbcTemplate.update("UPDATE orders SET status = 'CANCELLED' WHERE trade_id = ? AND status = 'PENDING_PAYMENT'", tradeId);
                 jdbcTemplate.update("UPDATE payment_orders SET status = 'EXPIRED' WHERE trade_id = ? AND status = 'PENDING'", tradeId);
+                userJdbcTemplate.update("""
+                        UPDATE user_coupons SET status = 'AVAILABLE', used_trade_id = NULL
+                        WHERE used_trade_id = ? AND status = 'RESERVED'
+                        """, tradeId);
             }
         }
     }

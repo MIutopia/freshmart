@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freshmart.auth.CurrentUser;
 import com.freshmart.order.FreightCalculator;
 import com.freshmart.order.MarketPriceSettlementPolicy;
+import com.freshmart.marketing.PromotionCalculator;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -12,6 +13,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,6 +31,7 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 public class TradeService {
     private final JdbcTemplate jdbcTemplate;
     private final JdbcTemplate userJdbcTemplate;
+    private final JdbcTemplate merchantJdbcTemplate;
     private final ObjectMapper objectMapper;
     private final int reservationMinutes;
     private final BigDecimal freeFreightThreshold;
@@ -37,6 +42,7 @@ public class TradeService {
     public TradeService(
             @Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
             @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate,
+            @Qualifier("merchantJdbcTemplate") JdbcTemplate merchantJdbcTemplate,
             ObjectMapper objectMapper,
             @Value("${commerce.inventory-reservation-minutes:15}") int reservationMinutes,
             @Value("${commerce.freight.free-threshold:59.00}") BigDecimal freeFreightThreshold,
@@ -45,6 +51,7 @@ public class TradeService {
             @Value("${commerce.points-per-currency:1.00}") BigDecimal pointsPerCurrency) {
         this.jdbcTemplate = jdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
+        this.merchantJdbcTemplate = merchantJdbcTemplate;
         this.objectMapper = objectMapper;
         this.reservationMinutes = reservationMinutes;
         this.freeFreightThreshold = freeFreightThreshold;
@@ -56,6 +63,12 @@ public class TradeService {
     @Transactional("tradeTransactionManager")
     public TradeView create(CurrentUser user, long deliveryZoneId, Map<String, Object> addressSnapshot,
             List<CheckoutLine> requestedLines, String idempotencyKey) {
+        return create(user, deliveryZoneId, addressSnapshot, requestedLines, List.of(), idempotencyKey);
+    }
+
+    @Transactional("tradeTransactionManager")
+    public TradeView create(CurrentUser user, long deliveryZoneId, Map<String, Object> addressSnapshot,
+            List<CheckoutLine> requestedLines, List<Long> couponIds, String idempotencyKey) {
         TradeView existing = findByIdempotencyKey(idempotencyKey);
         if (existing != null) {
             if (existing.userId() != user.userId()) {
@@ -89,20 +102,42 @@ public class TradeService {
                     .add(new PricedLine(product, requestedLine.weightGrams(), price));
         }
 
-        BigDecimal goodsAmount = merchantLines.values().stream().flatMap(List::stream)
-                .map(line -> line.price().userGoodsAmount()).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal freightAmount = BigDecimal.ZERO;
-        for (List<PricedLine> lines : merchantLines.values()) {
-            BigDecimal merchantGoods = lines.stream().map(line -> line.price().userGoodsAmount())
+        Map<Long, List<PromotionCalculator.Promotion>> merchantPromotions = loadPromotions(user.userId(), couponIds, merchantLines.keySet());
+        int points = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (rs, row) -> rs.getInt(1), user.userId()).stream().findFirst().orElse(0);
+        Map<Long, PromotionCalculator.DiscountResult> merchantDiscounts = new HashMap<>();
+        BigDecimal goodsAmount = BigDecimal.ZERO;
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        for (Map.Entry<Long, List<PricedLine>> entry : merchantLines.entrySet()) {
+            BigDecimal merchantGoods = entry.getValue().stream().map(line -> line.price().userGoodsAmount())
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            freightAmount = freightAmount.add(FreightCalculator.calculate(merchantGoods, freeFreightThreshold, standardFreight));
+            BigDecimal membershipRate = merchantJdbcTemplate.query("""
+                    SELECT discount_rate FROM membership_levels WHERE status = 'ACTIVE' AND min_points <= ?
+                    ORDER BY min_points DESC LIMIT 1
+                    """, (rs, row) -> rs.getBigDecimal(1), points).stream().findFirst().orElse(BigDecimal.valueOf(100));
+            PromotionCalculator.DiscountResult discount = PromotionCalculator.calculate(merchantGoods, membershipRate,
+                    merchantPromotions.getOrDefault(entry.getKey(), List.of()));
+            boolean containsIneligibleCoupon = merchantPromotions.getOrDefault(entry.getKey(), List.of()).stream()
+                    .anyMatch(promotion -> merchantGoods.compareTo(promotion.thresholdAmount()) < 0);
+            if (containsIneligibleCoupon) {
+                throw new ResponseStatusException(CONFLICT, "coupon threshold is not met");
+            }
+            merchantDiscounts.put(entry.getKey(), discount);
+            goodsAmount = goodsAmount.add(merchantGoods);
+            discountAmount = discountAmount.add(discount.discountAmount());
+        }
+        BigDecimal freightAmount = BigDecimal.ZERO;
+        for (Long merchantId : merchantLines.keySet()) {
+            freightAmount = freightAmount.add(FreightCalculator.calculate(merchantDiscounts.get(merchantId).payableGoodsAmount(),
+                    freeFreightThreshold, standardFreight));
         }
         String tradeNo = newNo("T");
         jdbcTemplate.update("""
                 INSERT INTO trade_orders (trade_no, user_id, goods_amount, freight_amount, discount_amount, payable_amount,
                                           reservation_expires_at, idempotency_key)
-                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-                """, tradeNo, user.userId(), goodsAmount, freightAmount, goodsAmount.add(freightAmount), expiresAt, idempotencyKey);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, tradeNo, user.userId(), goodsAmount, freightAmount, discountAmount,
+                goodsAmount.subtract(discountAmount).add(freightAmount), expiresAt, idempotencyKey);
         long tradeId = lastInsertId();
         String addressJson = json(addressSnapshot);
         List<String> orderNos = new ArrayList<>();
@@ -111,14 +146,16 @@ public class TradeService {
             List<PricedLine> lines = entry.getValue();
             long warehouseId = merchantWarehouseIds.get(merchantId);
             BigDecimal merchantGoods = lines.stream().map(line -> line.price().userGoodsAmount()).reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal merchantFreight = FreightCalculator.calculate(merchantGoods, freeFreightThreshold, standardFreight);
+            PromotionCalculator.DiscountResult discount = merchantDiscounts.get(merchantId);
+            BigDecimal merchantFreight = FreightCalculator.calculate(discount.payableGoodsAmount(), freeFreightThreshold, standardFreight);
             String orderNo = newNo("O");
             jdbcTemplate.update("""
                     INSERT INTO orders (order_no, trade_id, user_id, merchant_id, warehouse_id, delivery_zone_id, goods_amount,
                                         freight_amount, discount_amount, payable_amount, address_snapshot, pricing_snapshot)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, CAST(? AS JSON), CAST(? AS JSON))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON))
                     """, orderNo, tradeId, user.userId(), merchantId, warehouseId, deliveryZoneId, merchantGoods,
-                    merchantFreight, merchantGoods.add(merchantFreight), addressJson, json(Map.of("priceSource", "MARKET_CAP")));
+                    merchantFreight, discount.discountAmount(), discount.payableGoodsAmount().add(merchantFreight), addressJson,
+                    json(Map.of("priceSource", "MARKET_CAP", "promotionDiscount", discount.discountAmount())));
             long orderId = lastInsertId();
             orderNos.add(orderNo);
             for (PricedLine line : lines) {
@@ -133,8 +170,11 @@ public class TradeService {
                 reserveBatches(tradeId, orderId, line.product().productId(), warehouseId, line.weightGrams(), expiresAt);
             }
         }
-        return new TradeView(tradeId, tradeNo, user.userId(), "PENDING_PAYMENT", goodsAmount, freightAmount,
-                goodsAmount.add(freightAmount), expiresAt, List.copyOf(orderNos));
+        if (!reserveCoupons(user.userId(), tradeId, couponIds)) {
+            throw new ResponseStatusException(CONFLICT, "selected coupon is no longer available");
+        }
+        return new TradeView(tradeId, tradeNo, user.userId(), "PENDING_PAYMENT", goodsAmount, freightAmount, discountAmount,
+                goodsAmount.subtract(discountAmount).add(freightAmount), expiresAt, List.copyOf(orderNos));
     }
 
     @Transactional("tradeTransactionManager")
@@ -198,6 +238,10 @@ public class TradeService {
                 INSERT INTO fee_ledgers (trade_id, fee_type, amount, direction, reference_type, reference_id, idempotency_key)
                 VALUES (?, 'USER_PAYMENT', ?, 'CREDIT', 'TRADE', ?, ?)
                 """, trade.id(), trade.payableAmount(), trade.tradeNo(), "PAYMENT-" + trade.tradeNo());
+        userJdbcTemplate.update("""
+                UPDATE user_coupons SET status = 'USED', used_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND used_trade_id = ? AND status = 'RESERVED'
+                """, trade.userId(), trade.id());
         awardPoints(trade);
         return findById(trade.id());
     }
@@ -214,6 +258,59 @@ public class TradeService {
                 INSERT IGNORE INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
                 VALUES (?, ?, ?, ?, 'TRADE_PAYMENT', ?)
                 """, trade.userId(), trade.id(), points, newBalance, "POINTS-" + trade.tradeNo());
+    }
+
+    private boolean reserveCoupons(long userId, long tradeId, List<Long> couponIds) {
+        if (couponIds == null || couponIds.isEmpty()) {
+            return true;
+        }
+        Set<Long> unique = new HashSet<>(couponIds);
+        if (unique.size() != couponIds.size()) {
+            return false;
+        }
+        List<Long> reserved = new ArrayList<>();
+        for (Long couponId : unique) {
+            int updated = userJdbcTemplate.update("""
+                    UPDATE user_coupons SET status = 'RESERVED', used_trade_id = ?
+                    WHERE user_id = ? AND coupon_id = ? AND status = 'AVAILABLE'
+                    """, tradeId, userId, couponId);
+            if (updated == 0) {
+                if (!reserved.isEmpty()) {
+                    userJdbcTemplate.update("UPDATE user_coupons SET status = 'AVAILABLE', used_trade_id = NULL WHERE user_id = ? AND used_trade_id = ?",
+                            userId, tradeId);
+                }
+                return false;
+            }
+            reserved.add(couponId);
+        }
+        return true;
+    }
+
+    private Map<Long, List<PromotionCalculator.Promotion>> loadPromotions(long userId, List<Long> couponIds,
+            Set<Long> merchantIds) {
+        Map<Long, List<PromotionCalculator.Promotion>> result = new HashMap<>();
+        if (couponIds == null || couponIds.isEmpty()) {
+            return result;
+        }
+        for (Long couponId : new HashSet<>(couponIds)) {
+            boolean owned = !userJdbcTemplate.query("SELECT id FROM user_coupons WHERE user_id = ? AND coupon_id = ? AND status = 'AVAILABLE'",
+                    (rs, row) -> rs.getLong(1), userId, couponId).isEmpty();
+            if (!owned) {
+                throw new ResponseStatusException(CONFLICT, "coupon is not available to this user");
+            }
+            List<Coupon> coupons = merchantJdbcTemplate.query("""
+                    SELECT id, merchant_id, coupon_type, threshold_amount, discount_amount
+                    FROM coupons WHERE id = ? AND status = 'ACTIVE' AND starts_at <= CURRENT_TIMESTAMP AND ends_at > CURRENT_TIMESTAMP
+                    """, (rs, row) -> new Coupon(rs.getLong("id"), (Long) rs.getObject("merchant_id"),
+                    rs.getString("coupon_type"), rs.getBigDecimal("threshold_amount"), rs.getBigDecimal("discount_amount")), couponId);
+            Coupon coupon = coupons.stream().findFirst().orElseThrow(() -> new ResponseStatusException(CONFLICT, "coupon is expired or inactive"));
+            if (coupon.merchantId() == null || !merchantIds.contains(coupon.merchantId())) {
+                throw new ResponseStatusException(CONFLICT, "coupon does not match a merchant suborder");
+            }
+            result.computeIfAbsent(coupon.merchantId(), ignored -> new ArrayList<>())
+                    .add(new PromotionCalculator.Promotion(coupon.couponType(), coupon.thresholdAmount(), coupon.discountAmount(), true, 100));
+        }
+        return result;
     }
 
     private ProductWarehouse findProductWarehouse(long productId, long deliveryZoneId) {
@@ -295,7 +392,7 @@ public class TradeService {
     private TradeView queryTrade(String sql, Object value) {
         return jdbcTemplate.query(sql, (rs, row) -> new TradeView(rs.getLong("id"), rs.getString("trade_no"),
                 rs.getLong("user_id"), rs.getString("status"), rs.getBigDecimal("goods_amount"),
-                rs.getBigDecimal("freight_amount"), rs.getBigDecimal("payable_amount"),
+                rs.getBigDecimal("freight_amount"), rs.getBigDecimal("discount_amount"), rs.getBigDecimal("payable_amount"),
                 rs.getObject("reservation_expires_at", LocalDateTime.class), List.of()), value).stream().findFirst().orElse(null);
     }
 
@@ -319,7 +416,7 @@ public class TradeService {
     }
 
     public record TradeView(long id, String tradeNo, long userId, String status, BigDecimal goodsAmount,
-            BigDecimal freightAmount, BigDecimal payableAmount, LocalDateTime reservationExpiresAt, List<String> orderNos) {
+            BigDecimal freightAmount, BigDecimal discountAmount, BigDecimal payableAmount, LocalDateTime reservationExpiresAt, List<String> orderNos) {
     }
 
     public record PaymentView(String paymentNo, String status, BigDecimal amount, String codeUrl) {
@@ -336,5 +433,8 @@ public class TradeService {
     }
 
     private record Reservation(long id, long productId, long batchId, int grams) {
+    }
+
+    private record Coupon(long id, Long merchantId, String couponType, BigDecimal thresholdAmount, BigDecimal discountAmount) {
     }
 }

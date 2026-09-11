@@ -36,7 +36,7 @@ public class TradeController {
         List<TradeService.CheckoutLine> lines = request.lines().stream()
                 .map(line -> new TradeService.CheckoutLine(line.productId(), line.weightGrams()))
                 .toList();
-        return tradeService.create(user, request.deliveryZoneId(), request.addressSnapshot(), lines, idempotencyKey);
+        return tradeService.create(user, request.deliveryZoneId(), request.addressSnapshot(), lines, request.couponIds(), idempotencyKey);
     }
 
     @PostMapping("/api/payments/{tradeNo}/prepay")
@@ -52,7 +52,7 @@ public class TradeController {
     }
 
     public record CreateTradeRequest(@Positive long deliveryZoneId, @NotNull Map<String, Object> addressSnapshot,
-            @NotEmpty List<@Valid CheckoutLineRequest> lines) {
+            @NotEmpty List<@Valid CheckoutLineRequest> lines, List<@Positive Long> couponIds) {
     }
 
     public record CheckoutLineRequest(@Positive long productId, @Positive int weightGrams) {
