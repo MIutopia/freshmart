@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 
 @RestController
 public class RefundController {
@@ -33,7 +35,17 @@ public class RefundController {
                 request.evidenceImages(), idempotencyKey);
     }
 
+    @PutMapping("/api/admin/refunds/{refundId}/review")
+    @PreAuthorize("hasRole('ADMIN')")
+    public RefundService.RefundView review(@AuthenticationPrincipal CurrentUser admin, @PathVariable long refundId,
+            @Valid @RequestBody ReviewRequest request) {
+        return refundService.review(admin, refundId, request.approved(), request.reviewNote());
+    }
+
     public record RefundRequest(@Positive long orderId, @NotBlank String issueType,
             @NotBlank String description, @NotEmpty List<@NotBlank String> evidenceImages) {
+    }
+
+    public record ReviewRequest(boolean approved, @NotBlank String reviewNote) {
     }
 }

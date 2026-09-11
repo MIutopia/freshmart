@@ -216,6 +216,10 @@ public class TradeService {
             throw new ResponseStatusException(CONFLICT, "insufficient wallet balance");
         }
         try {
+            jdbcTemplate.update("""
+                    INSERT INTO payment_orders (payment_no, trade_id, provider, payment_mode, amount, idempotency_key)
+                    VALUES (?, ?, 'BALANCE', 'BALANCE', ?, ?)
+                    """, newNo("P"), trade.id(), trade.payableAmount(), "BALANCE-" + trade.tradeNo());
             BigDecimal balance = userJdbcTemplate.query("SELECT balance FROM wallet_accounts WHERE user_id = ?",
                     (rs, row) -> rs.getBigDecimal(1), user.userId()).stream().findFirst().orElse(BigDecimal.ZERO);
             userJdbcTemplate.update("""
