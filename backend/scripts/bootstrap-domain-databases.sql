@@ -84,6 +84,41 @@ CREATE TABLE IF NOT EXISTS freshmart_user.wallet_transactions (
   CONSTRAINT fk_wallet_transaction_wallet FOREIGN KEY (wallet_id) REFERENCES freshmart_user.wallet_accounts(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_user.user_memberships (
+  user_id BIGINT PRIMARY KEY,
+  level_id BIGINT NOT NULL,
+  points INT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_membership_level (level_id),
+  CONSTRAINT fk_membership_user FOREIGN KEY (user_id) REFERENCES freshmart_user.users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_user.points_transactions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  trade_id BIGINT NULL,
+  change_amount INT NOT NULL,
+  balance_after INT NOT NULL,
+  reason VARCHAR(120) NOT NULL,
+  idempotency_key VARCHAR(80) NOT NULL UNIQUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_points_user_created (user_id, created_at),
+  CONSTRAINT fk_points_user FOREIGN KEY (user_id) REFERENCES freshmart_user.users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_user.user_coupons (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  coupon_id BIGINT NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'AVAILABLE',
+  claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  used_trade_id BIGINT NULL,
+  used_at DATETIME NULL,
+  UNIQUE KEY uk_user_coupon (user_id, coupon_id),
+  KEY idx_user_coupon_status (user_id, status),
+  CONSTRAINT fk_user_coupon_user FOREIGN KEY (user_id) REFERENCES freshmart_user.users(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_merchant.merchants (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   owner_user_id BIGINT NOT NULL,
@@ -159,6 +194,46 @@ CREATE TABLE IF NOT EXISTS freshmart_merchant.inventory_batches (
   KEY idx_batch_warehouse_expiry (warehouse_id, expires_on, available_grams),
   CONSTRAINT fk_batch_product FOREIGN KEY (product_id) REFERENCES freshmart_merchant.products(id),
   CONSTRAINT fk_batch_warehouse FOREIGN KEY (warehouse_id) REFERENCES freshmart_merchant.warehouses(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_merchant.promotion_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  merchant_id BIGINT NULL,
+  promotion_type VARCHAR(24) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  rule_json JSON NOT NULL,
+  starts_at DATETIME NOT NULL,
+  ends_at DATETIME NOT NULL,
+  stackable BOOLEAN NOT NULL DEFAULT TRUE,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_promotion_scope_time (merchant_id, status, starts_at, ends_at),
+  CONSTRAINT fk_promotion_merchant FOREIGN KEY (merchant_id) REFERENCES freshmart_merchant.merchants(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_merchant.coupons (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  merchant_id BIGINT NULL,
+  name VARCHAR(128) NOT NULL,
+  coupon_type VARCHAR(16) NOT NULL,
+  threshold_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  starts_at DATETIME NOT NULL,
+  ends_at DATETIME NOT NULL,
+  total_quantity INT NOT NULL,
+  claimed_quantity INT NOT NULL DEFAULT 0,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_coupon_scope_time (merchant_id, status, starts_at, ends_at),
+  CONSTRAINT fk_coupon_merchant FOREIGN KEY (merchant_id) REFERENCES freshmart_merchant.merchants(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_merchant.membership_levels (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(40) NOT NULL UNIQUE,
+  min_points INT NOT NULL,
+  discount_rate DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE'
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_merchant.warehouse_operable_categories (
