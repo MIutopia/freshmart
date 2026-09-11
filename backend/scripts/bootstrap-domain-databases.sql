@@ -396,6 +396,29 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
   KEY idx_payment_trade_status (trade_id, status)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_trade.refund_orders (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  refund_no VARCHAR(40) NOT NULL UNIQUE,
+  payment_id BIGINT NOT NULL,
+  order_id BIGINT NOT NULL,
+  reason VARCHAR(300) NOT NULL,
+  issue_type VARCHAR(32) NOT NULL,
+  evidence_description VARCHAR(1000) NOT NULL,
+  evidence_images_json JSON NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  review_mode VARCHAR(24) NOT NULL DEFAULT 'CUSTOMER_SERVICE_AI',
+  reviewed_by BIGINT NULL,
+  reviewed_at DATETIME NULL,
+  idempotency_key VARCHAR(80) NOT NULL UNIQUE,
+  refunded_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_refund_order_status (order_id, status),
+  CONSTRAINT fk_refund_payment FOREIGN KEY (payment_id) REFERENCES freshmart_trade.payment_orders(id),
+  CONSTRAINT fk_refund_order FOREIGN KEY (order_id) REFERENCES freshmart_trade.orders(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_trade.fee_ledgers (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   trade_id BIGINT NULL,
