@@ -331,6 +331,7 @@ CREATE TABLE IF NOT EXISTS freshmart_delivery.delivery_tasks (
   accepted_at DATETIME NULL,
   picked_at DATETIME NULL,
   delivered_at DATETIME NULL,
+  timeout_at DATETIME NULL,
   proof_url VARCHAR(512) NULL,
   exception_note VARCHAR(500) NULL,
   KEY idx_delivery_rider_status (rider_user_id, status),
@@ -550,9 +551,13 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_reconciliation_differences (
   bill_entry_id BIGINT NULL,
   difference_type VARCHAR(32) NOT NULL,
   description VARCHAR(500) NOT NULL,
-  status VARCHAR(24) NOT NULL DEFAULT 'OPEN',
+  status VARCHAR(24) NOT NULL DEFAULT 'UNHANDLED',
+  claimed_by BIGINT NULL,
+  claimed_at DATETIME NULL,
   resolved_by BIGINT NULL,
   resolved_at DATETIME NULL,
+  resolution VARCHAR(24) NULL,
+  resolution_note VARCHAR(500) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_reconciliation_status (status, created_at)
 ) ENGINE=InnoDB;
@@ -737,6 +742,16 @@ FROM freshmart_user.users
 WHERE login_name = 'admin-test-01';
 
 INSERT IGNORE INTO freshmart_user.user_role_assignments (user_id, role_code)
+SELECT id, 'OPERATIONS'
+FROM freshmart_user.users
+WHERE login_name = 'admin-test-01';
+
+INSERT IGNORE INTO freshmart_user.user_role_assignments (user_id, role_code)
+SELECT id, 'FINANCE'
+FROM freshmart_user.users
+WHERE login_name = 'admin-test-01';
+
+INSERT IGNORE INTO freshmart_user.user_role_assignments (user_id, role_code)
 SELECT id, 'CONSUMER'
 FROM freshmart_user.users
 WHERE login_name LIKE 'consumer-test-%';
@@ -769,3 +784,51 @@ INSERT IGNORE INTO freshmart_delivery.rider_profiles (user_id, employee_no, stat
 SELECT id, CONCAT('TEST-RIDER-', RIGHT(login_name, 2)), 'ACTIVE'
 FROM freshmart_user.users
 WHERE login_name LIKE 'rider-test-%';
+
+ALTER TABLE freshmart_trade.payment_reconciliation_differences
+  ADD COLUMN IF NOT EXISTS claimed_by BIGINT NULL AFTER status,
+  ADD COLUMN IF NOT EXISTS claimed_at DATETIME NULL AFTER claimed_by,
+  ADD COLUMN IF NOT EXISTS resolution VARCHAR(24) NULL AFTER resolved_at,
+  ADD COLUMN IF NOT EXISTS resolution_note VARCHAR(500) NULL AFTER resolution;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.financial_status_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  entity_type VARCHAR(24) NOT NULL,
+  entity_no VARCHAR(80) NOT NULL,
+  from_status VARCHAR(32) NULL,
+  to_status VARCHAR(32) NOT NULL,
+  action_code VARCHAR(64) NOT NULL,
+  operator_user_id BIGINT NULL,
+  remark VARCHAR(500) NULL,
+  source_type VARCHAR(24) NOT NULL DEFAULT 'MANUAL',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_financial_status_entity (entity_type, entity_no, created_at)
+) ENGINE=InnoDB;
+
+UPDATE freshmart_trade.payment_orders
+SET status = CASE status
+  WHEN 'EXPIRED' THEN 'CANCELLED'
+  WHEN 'AMOUNT_MISMATCH' THEN 'ABNORMAL'
+  WHEN 'REMARK_MISSING' THEN 'ABNORMAL'
+  WHEN 'VERIFICATION_FAILED' THEN 'ABNORMAL'
+  ELSE status
+END
+WHERE status IN ('EXPIRED', 'AMOUNT_MISMATCH', 'REMARK_MISSING', 'VERIFICATION_FAILED');
+
+UPDATE freshmart_trade.refund_orders
+SET status = CASE status
+  WHEN 'PENDING_MANUAL_REFUND' THEN 'MANUAL_PROCESS'
+  WHEN 'MANUAL_REFUND_COMPLETED' THEN 'REFUND_SUCCESS'
+  WHEN 'MANUAL_REFUND_FAILED' THEN 'REFUND_FAIL'
+  WHEN 'REFUNDED' THEN 'REFUND_SUCCESS'
+  ELSE status
+END
+WHERE status IN ('PENDING_MANUAL_REFUND', 'MANUAL_REFUND_COMPLETED', 'MANUAL_REFUND_FAILED', 'REFUNDED');
+
+UPDATE freshmart_trade.payment_reconciliation_differences
+SET status = CASE status
+  WHEN 'OPEN' THEN 'UNHANDLED'
+  WHEN 'RESOLVED' THEN 'HANDLED'
+  ELSE status
+END
+WHERE status IN ('OPEN', 'RESOLVED');

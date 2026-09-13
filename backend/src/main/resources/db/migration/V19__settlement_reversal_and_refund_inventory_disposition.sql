@@ -1,6 +1,6 @@
 ALTER TABLE freshmart_trade.merchant_settlements
-  ADD COLUMN IF NOT EXISTS reversed_at DATETIME NULL AFTER settled_at,
-  ADD COLUMN IF NOT EXISTS reversal_reason VARCHAR(80) NULL AFTER reversed_at;
+  ADD COLUMN reversed_at DATETIME NULL AFTER settled_at,
+  ADD COLUMN reversal_reason VARCHAR(80) NULL AFTER reversed_at;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.refund_inventory_dispositions (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

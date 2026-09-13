@@ -9,6 +9,11 @@ import com.freshmart.marketing.BatchPromotionPolicy;
 import com.freshmart.marketing.FlashSalePolicy;
 import com.freshmart.marketing.PromotionCalculator;
 import com.freshmart.platform.PlatformRuleService;
+import com.freshmart.payment.PaymentAdapterFactory;
+import com.freshmart.payment.FinancialStatusLogService;
+import com.freshmart.payment.PaymentResult;
+import com.freshmart.payment.PaymentBillEntry;
+import com.freshmart.payment.PaymentBillImportResult;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -43,6 +48,8 @@ public class TradeService {
     private final BigDecimal maxMarkupRate;
     private final BigDecimal pointsPerCurrency;
     private final String personalWechatQrUrl;
+    private final PaymentAdapterFactory paymentAdapterFactory;
+    private final FinancialStatusLogService statusLogService;
 
     public TradeService(
             @Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
@@ -55,7 +62,8 @@ public class TradeService {
             @Value("${commerce.freight.standard-fee:6.00}") BigDecimal standardFreight,
             @Value("${commerce.market-price.max-markup-rate:5.00}") BigDecimal maxMarkupRate,
             @Value("${commerce.points-per-currency:1.00}") BigDecimal pointsPerCurrency,
-            @Value("${commerce.payment.personal-wechat-qr-url:}") String personalWechatQrUrl) {
+            @Value("${commerce.payment.personal-wechat-qr-url:}") String personalWechatQrUrl,
+            PaymentAdapterFactory paymentAdapterFactory, FinancialStatusLogService statusLogService) {
         this.jdbcTemplate = jdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
         this.merchantJdbcTemplate = merchantJdbcTemplate;
@@ -67,6 +75,8 @@ public class TradeService {
         this.maxMarkupRate = maxMarkupRate;
         this.pointsPerCurrency = pointsPerCurrency;
         this.personalWechatQrUrl = personalWechatQrUrl;
+        this.paymentAdapterFactory = paymentAdapterFactory;
+        this.statusLogService = statusLogService;
     }
 
     @Transactional("tradeTransactionManager")
@@ -217,34 +227,145 @@ public class TradeService {
     @Transactional("tradeTransactionManager")
     public PaymentView prepay(CurrentUser user, String tradeNo) {
         TradeView trade = requireOwnedPendingTrade(user, tradeNo);
-        List<PaymentView> existing = jdbcTemplate.query("""
-                SELECT payment_no, status, amount, code_url FROM payment_orders
-                WHERE trade_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1
-                """, (rs, row) -> new PaymentView(rs.getString("payment_no"), rs.getString("status"),
-                rs.getBigDecimal("amount"), rs.getString("code_url")), trade.id());
-        if (!existing.isEmpty()) {
-            return existing.get(0);
-        }
-        if (personalWechatQrUrl == null || personalWechatQrUrl.isBlank()) {
-            throw new ResponseStatusException(CONFLICT, "personal WeChat QR code is not configured for local testing");
-        }
-        String paymentNo = newNo("P");
-        String codeUrl = personalWechatQrUrl.trim();
-        jdbcTemplate.update("""
-                INSERT INTO payment_orders (payment_no, trade_id, provider, payment_mode, code_url, amount, idempotency_key)
-                VALUES (?, ?, 'PERSONAL_WECHAT_QR', 'MANUAL_CONFIRMATION', ?, ?, ?)
-                """, paymentNo, trade.id(), codeUrl, trade.payableAmount(), "PREPAY-" + trade.tradeNo());
-        return new PaymentView(paymentNo, "PENDING", trade.payableAmount(), codeUrl);
+        PaymentResult result = paymentAdapterFactory.payment().createPayment(trade.id(), trade.tradeNo(), trade.payableAmount(), "PREPAY-" + trade.tradeNo());
+        return new PaymentView(result.paymentNo(), result.status().name(), result.amount(), result.codeUrl(), result.remarkText());
     }
 
     public PaymentView paymentCode(CurrentUser user, String tradeNo) {
         TradeView trade = requireOwnedPendingTrade(user, tradeNo);
         return jdbcTemplate.query("""
-                SELECT payment_no, status, amount, code_url FROM payment_orders
+                SELECT payment_no, status, amount, code_url, remark_text FROM payment_orders
                 WHERE trade_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1
                 """, (rs, row) -> new PaymentView(rs.getString("payment_no"), rs.getString("status"),
-                rs.getBigDecimal("amount"), rs.getString("code_url")), trade.id()).stream().findFirst()
+                rs.getBigDecimal("amount"), rs.getString("code_url"), rs.getString("remark_text")), trade.id()).stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "pending personal WeChat QR payment not found"));
+    }
+
+    @Transactional("tradeTransactionManager")
+    public PaymentView submitPaymentProof(CurrentUser user, String tradeNo, String proofUrl, String remarkText) {
+        TradeView trade = requireOwnedPendingTrade(user, tradeNo);
+        String paymentNo = jdbcTemplate.query("SELECT payment_no FROM payment_orders WHERE trade_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1",
+                (rs, row) -> rs.getString(1), trade.id()).stream().findFirst()
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "pending payment not found"));
+        PaymentResult result = paymentAdapterFactory.payment().submitProof(paymentNo, proofUrl, remarkText, user.userId());
+        return new PaymentView(result.paymentNo(), result.status().name(), result.amount(), result.codeUrl(), result.remarkText());
+    }
+
+    @Transactional("tradeTransactionManager")
+    public PaymentView verifyPaymentProof(CurrentUser admin, String paymentNo, boolean approved, String note) {
+        PaymentResult result = paymentAdapterFactory.payment().verifyPayment(paymentNo, admin.userId(), approved, note);
+        if (approved) {
+            TradeView trade = jdbcTemplate.query("SELECT t.* FROM trade_orders t JOIN payment_orders p ON p.trade_id=t.id WHERE p.payment_no=?", (rs, row) -> new TradeView(rs.getLong("id"), rs.getString("trade_no"), rs.getLong("user_id"), rs.getString("status"), rs.getBigDecimal("goods_amount"), rs.getBigDecimal("freight_amount"), rs.getBigDecimal("discount_amount"), rs.getBigDecimal("payable_amount"), rs.getObject("reservation_expires_at", LocalDateTime.class), List.of()), paymentNo).stream().findFirst().orElseThrow();
+            settlePaidTrade(trade);
+        }
+        return new PaymentView(result.paymentNo(), result.status().name(), result.amount(), result.codeUrl(), result.remarkText());
+    }
+
+    @Transactional("tradeTransactionManager")
+    public PaymentView matchPaymentBill(CurrentUser admin, String paymentNo, String transactionId, BigDecimal amount, String direction, String remarkText) {
+        PaymentResult result = paymentAdapterFactory.payment().matchBill(paymentNo, transactionId, amount, direction, remarkText, admin.userId());
+        if (result.status() == com.freshmart.payment.PaymentStatus.PAID) {
+            TradeView trade = jdbcTemplate.query("SELECT t.* FROM trade_orders t JOIN payment_orders p ON p.trade_id=t.id WHERE p.payment_no=?", (rs, row) -> new TradeView(rs.getLong("id"), rs.getString("trade_no"), rs.getLong("user_id"), rs.getString("status"), rs.getBigDecimal("goods_amount"), rs.getBigDecimal("freight_amount"), rs.getBigDecimal("discount_amount"), rs.getBigDecimal("payable_amount"), rs.getObject("reservation_expires_at", LocalDateTime.class), List.of()), paymentNo).stream().findFirst().orElseThrow();
+            settlePaidTrade(trade);
+        }
+        return new PaymentView(result.paymentNo(), result.status().name(), result.amount(), result.codeUrl(), result.remarkText());
+    }
+
+    @Transactional("tradeTransactionManager")
+    public PaymentBillImportResult importPaymentBill(CurrentUser admin, String fileName, List<PaymentBillEntry> entries) {
+        PaymentBillImportResult result = paymentAdapterFactory.payment().importBill(fileName, admin.userId(), entries);
+        if (result.matchedEntries() > 0) {
+            jdbcTemplate.query("SELECT DISTINCT t.* FROM trade_orders t JOIN payment_orders p ON p.trade_id = t.id JOIN payment_bill_entries e ON e.payment_no = p.payment_no WHERE e.import_id = ? AND e.match_result = 'MATCHED' AND p.status = 'PAID'",
+                    (rs, row) -> new TradeView(rs.getLong("id"), rs.getString("trade_no"), rs.getLong("user_id"), rs.getString("status"), rs.getBigDecimal("goods_amount"), rs.getBigDecimal("freight_amount"), rs.getBigDecimal("discount_amount"), rs.getBigDecimal("payable_amount"), rs.getObject("reservation_expires_at", LocalDateTime.class), List.of()), result.importId())
+                    .forEach(this::settlePaidTradeIfPending);
+        }
+        return result;
+    }
+
+    public List<ReconciliationDifferenceView> listReconciliationDifferences(String status) {
+        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
+            return jdbcTemplate.query("SELECT id, payment_no, bill_entry_id, difference_type, description, status, claimed_by, claimed_at, resolved_by, resolved_at, resolution, resolution_note, created_at FROM payment_reconciliation_differences ORDER BY created_at DESC",
+                    (rs, row) -> reconciliationDifference(rs));
+        }
+        if (!"UNHANDLED".equalsIgnoreCase(status) && !"HANDLING".equalsIgnoreCase(status)
+                && !"HANDLED".equalsIgnoreCase(status) && !"PENDING_SHELVE".equalsIgnoreCase(status)) {
+            throw new ResponseStatusException(BAD_REQUEST, "invalid reconciliation status");
+        }
+        return jdbcTemplate.query("SELECT id, payment_no, bill_entry_id, difference_type, description, status, claimed_by, claimed_at, resolved_by, resolved_at, resolution, resolution_note, created_at FROM payment_reconciliation_differences WHERE status = ? ORDER BY created_at DESC",
+                (rs, row) -> reconciliationDifference(rs), status.toUpperCase());
+    }
+
+    private ReconciliationDifferenceView reconciliationDifference(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new ReconciliationDifferenceView(rs.getLong("id"), rs.getString("payment_no"),
+                (Long) rs.getObject("bill_entry_id"), rs.getString("difference_type"), rs.getString("description"),
+                rs.getString("status"), (Long) rs.getObject("claimed_by"), rs.getObject("claimed_at", LocalDateTime.class),
+                (Long) rs.getObject("resolved_by"), rs.getObject("resolved_at", LocalDateTime.class),
+                rs.getString("resolution"), rs.getString("resolution_note"), rs.getObject("created_at", LocalDateTime.class));
+    }
+
+    @Transactional("tradeTransactionManager")
+    public ReconciliationDifferenceView claimReconciliationDifference(CurrentUser operator, long differenceId, String note) {
+        ReconciliationDifference difference = findDifference(differenceId);
+        int updated = jdbcTemplate.update("UPDATE payment_reconciliation_differences SET status = 'HANDLING', claimed_by = ?, claimed_at = CURRENT_TIMESTAMP, resolution_note = ? WHERE id = ? AND status = 'UNHANDLED'",
+                operator.userId(), note.trim(), differenceId);
+        if (updated == 0) throw new ResponseStatusException(CONFLICT, "difference is not available for claim");
+        statusLogService.record("RECONCILIATION", Long.toString(differenceId), difference.status(), "HANDLING", "RECONCILIATION_CLAIMED", operator.userId(), note, "MANUAL");
+        return findDifference(differenceId).toView();
+    }
+
+    @Transactional("tradeTransactionManager")
+    public ReconciliationDifferenceView shelveReconciliationDifference(CurrentUser operator, long differenceId, String note) {
+        ReconciliationDifference difference = findDifference(differenceId);
+        int updated = jdbcTemplate.update("UPDATE payment_reconciliation_differences SET status = 'PENDING_SHELVE', resolution_note = ? WHERE id = ? AND status = 'HANDLING' AND claimed_by = ?",
+                note.trim(), differenceId, operator.userId());
+        if (updated == 0) throw new ResponseStatusException(CONFLICT, "difference must be claimed by the current operator");
+        statusLogService.record("RECONCILIATION", Long.toString(differenceId), difference.status(), "PENDING_SHELVE", "RECONCILIATION_SHELVED", operator.userId(), note, "MANUAL");
+        return findDifference(differenceId).toView();
+    }
+
+    @Transactional("tradeTransactionManager")
+    public ReconciliationDifferenceView resolveReconciliationDifference(CurrentUser operator, long differenceId, String resolution, String note) {
+        ReconciliationDifference difference = findDifference(differenceId);
+        String target = resolution.trim().toUpperCase();
+        if (!Set.of("PAID", "PENDING", "IRRELEVANT").contains(target)) {
+            throw new ResponseStatusException(BAD_REQUEST, "resolution must be PAID, PENDING or IRRELEVANT");
+        }
+        if (!"HANDLING".equals(difference.status()) || !operator.userId().equals(difference.claimedBy())) {
+            throw new ResponseStatusException(CONFLICT, "difference must be claimed by the current operator");
+        }
+        if (!"IRRELEVANT".equals(target)) {
+            if (difference.paymentNo() == null) throw new ResponseStatusException(CONFLICT, "difference has no payment to correct");
+            int paymentUpdated = jdbcTemplate.update("UPDATE payment_orders SET status = ?, failure_code = NULL, failure_message = NULL WHERE payment_no = ? AND status = 'ABNORMAL'",
+                    target, difference.paymentNo());
+            if (paymentUpdated == 0) throw new ResponseStatusException(CONFLICT, "payment is not in abnormal status");
+            statusLogService.record("PAYMENT", difference.paymentNo(), "ABNORMAL", target, "PAYMENT_RECONCILIATION_RESOLVED", operator.userId(), note, "MANUAL");
+            if ("PAID".equals(target)) {
+                TradeView trade = jdbcTemplate.query("SELECT t.* FROM trade_orders t JOIN payment_orders p ON p.trade_id = t.id WHERE p.payment_no = ?",
+                        (rs, row) -> new TradeView(rs.getLong("id"), rs.getString("trade_no"), rs.getLong("user_id"), rs.getString("status"), rs.getBigDecimal("goods_amount"), rs.getBigDecimal("freight_amount"), rs.getBigDecimal("discount_amount"), rs.getBigDecimal("payable_amount"), rs.getObject("reservation_expires_at", LocalDateTime.class), List.of()), difference.paymentNo()).stream().findFirst().orElseThrow();
+                settlePaidTradeIfPending(trade);
+            }
+        } else if (difference.billEntryId() != null) {
+            jdbcTemplate.update("UPDATE payment_bill_entries SET match_result = 'IRRELEVANT' WHERE id = ?", difference.billEntryId());
+        }
+        jdbcTemplate.update("UPDATE payment_reconciliation_differences SET status = 'HANDLED', resolved_by = ?, resolved_at = CURRENT_TIMESTAMP, resolution = ?, resolution_note = ? WHERE id = ? AND status = 'HANDLING' AND claimed_by = ?",
+                operator.userId(), target, note.trim(), differenceId, operator.userId());
+        statusLogService.record("RECONCILIATION", Long.toString(differenceId), "HANDLING", "HANDLED", "RECONCILIATION_RESOLVED", operator.userId(), note, "MANUAL");
+        return findDifference(differenceId).toView();
+    }
+
+    private ReconciliationDifference findDifference(long differenceId) {
+        return jdbcTemplate.query("SELECT id, payment_no, bill_entry_id, difference_type, description, status, claimed_by, claimed_at, resolved_by, resolved_at, resolution, resolution_note, created_at FROM payment_reconciliation_differences WHERE id = ? FOR UPDATE",
+                (rs, row) -> new ReconciliationDifference(rs.getLong("id"), rs.getString("payment_no"), (Long) rs.getObject("bill_entry_id"),
+                        rs.getString("difference_type"), rs.getString("description"), rs.getString("status"), (Long) rs.getObject("claimed_by"),
+                        rs.getObject("claimed_at", LocalDateTime.class), (Long) rs.getObject("resolved_by"), rs.getObject("resolved_at", LocalDateTime.class),
+                        rs.getString("resolution"), rs.getString("resolution_note"), rs.getObject("created_at", LocalDateTime.class)), differenceId)
+                .stream().findFirst().orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "reconciliation difference not found"));
+    }
+
+    private void settlePaidTradeIfPending(TradeView trade) {
+        if ("PENDING_PAYMENT".equals(trade.status())) {
+            settlePaidTrade(trade);
+        }
     }
 
     @Transactional("tradeTransactionManager")
@@ -256,6 +377,10 @@ public class TradeService {
         if (!"PENDING_PAYMENT".equals(trade.status())) {
             throw new ResponseStatusException(CONFLICT, "trade is not awaiting payment");
         }
+        PaymentResult payment = jdbcTemplate.query("SELECT payment_no FROM payment_orders WHERE trade_id = ? AND status IN ('PENDING','PROOF_SUBMITTED') ORDER BY id DESC LIMIT 1",
+                (rs, row) -> rs.getString(1), trade.id()).stream().findFirst()
+                .map(no -> paymentAdapterFactory.payment().verifyPayment(no, admin.userId(), true, "管理员人工核验通过"))
+                .orElseThrow(() -> new ResponseStatusException(CONFLICT, "pending payment not found"));
         return settlePaidTrade(trade);
     }
 
@@ -605,7 +730,21 @@ public class TradeService {
             BigDecimal freightAmount, BigDecimal discountAmount, BigDecimal payableAmount, LocalDateTime reservationExpiresAt, List<String> orderNos) {
     }
 
-    public record PaymentView(String paymentNo, String status, BigDecimal amount, String codeUrl) {
+    public record PaymentView(String paymentNo, String status, BigDecimal amount, String codeUrl, String remarkText) {
+    }
+
+    public record ReconciliationDifferenceView(long id, String paymentNo, Long billEntryId, String differenceType,
+            String description, String status, Long claimedBy, LocalDateTime claimedAt, Long resolvedBy,
+            LocalDateTime resolvedAt, String resolution, String resolutionNote, LocalDateTime createdAt) {
+    }
+
+    private record ReconciliationDifference(long id, String paymentNo, Long billEntryId, String differenceType,
+            String description, String status, Long claimedBy, LocalDateTime claimedAt, Long resolvedBy,
+            LocalDateTime resolvedAt, String resolution, String resolutionNote, LocalDateTime createdAt) {
+        private ReconciliationDifferenceView toView() {
+            return new ReconciliationDifferenceView(id, paymentNo, billEntryId, differenceType, description, status,
+                    claimedBy, claimedAt, resolvedBy, resolvedAt, resolution, resolutionNote, createdAt);
+        }
     }
 
     private record ProductWarehouse(long productId, long merchantId, long categoryId, long warehouseId, String name,

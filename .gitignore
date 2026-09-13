@@ -23,6 +23,7 @@ work/export-windows-ca.ps1
 .env
 .env.*
 !.env.example
+backend/config/application-local.yml
 
 # OS
 .DS_Store

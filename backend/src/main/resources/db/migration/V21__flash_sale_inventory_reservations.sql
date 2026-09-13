@@ -28,6 +28,6 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.flash_sale_reservations (
   KEY idx_flash_sale_reservation_expiry (status, expires_at)
 ) ENGINE=InnoDB;
 
-ALTER TABLE freshmart_trade.order_items
-  ADD COLUMN IF NOT EXISTS flash_sale_id BIGINT NULL AFTER batch_promotion_discount_amount,
-  ADD COLUMN IF NOT EXISTS flash_sale_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER flash_sale_id;
+ALTER TABLE freshmart.order_items
+  ADD COLUMN flash_sale_id BIGINT NULL AFTER batch_promotion_discount_amount,
+  ADD COLUMN flash_sale_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER flash_sale_id;

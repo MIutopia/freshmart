@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freshmart.auth.CurrentUser;
 import com.freshmart.platform.PlatformRuleService;
+import com.freshmart.payment.PaymentAdapterFactory;
+import com.freshmart.payment.FinancialStatusLogService;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -26,18 +28,23 @@ public class RefundService {
     private final ObjectMapper objectMapper;
     private final PlatformRuleService platformRuleService;
     private final int windowMinutes;
+    private final PaymentAdapterFactory paymentAdapterFactory;
+    private final FinancialStatusLogService statusLogService;
 
     public RefundService(@Qualifier("tradeJdbcTemplate") JdbcTemplate tradeJdbcTemplate,
             @Qualifier("deliveryJdbcTemplate") JdbcTemplate deliveryJdbcTemplate,
             @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate, ObjectMapper objectMapper,
             PlatformRuleService platformRuleService,
-            @Value("${commerce.refund.default-window-minutes:1440}") int windowMinutes) {
+            @Value("${commerce.refund.default-window-minutes:1440}") int windowMinutes,
+            PaymentAdapterFactory paymentAdapterFactory, FinancialStatusLogService statusLogService) {
         this.tradeJdbcTemplate = tradeJdbcTemplate;
         this.deliveryJdbcTemplate = deliveryJdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
         this.objectMapper = objectMapper;
         this.platformRuleService = platformRuleService;
         this.windowMinutes = windowMinutes;
+        this.paymentAdapterFactory = paymentAdapterFactory;
+        this.statusLogService = statusLogService;
     }
 
     @Transactional("tradeTransactionManager")
@@ -78,6 +85,7 @@ public class RefundService {
                 """, refundNo, order.paymentId(), order.id(), description.trim(), issueType,
                 description.trim(), json(images), order.amount(), idempotencyKey);
         long id = tradeJdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        statusLogService.record("REFUND", refundNo, null, "PENDING", "REFUND_APPLIED", user.userId(), "用户提交售后申请", "BUSINESS");
         return new RefundView(id, refundNo, order.id(), issueType, order.amount(), "PENDING", deliveredAt);
     }
 
@@ -85,7 +93,7 @@ public class RefundService {
     public RefundView review(CurrentUser admin, long refundId, boolean approved, String reviewNote) {
         RefundDetail refund = tradeJdbcTemplate.query("""
                 SELECT refund.id, refund.refund_no, refund.order_id, refund.issue_type, refund.amount, refund.status,
-                       payment.provider, payment.trade_id, orders.user_id, trade.payable_amount AS trade_payable_amount,
+                       payment.provider, payment.trade_id, payment.id AS payment_id, orders.user_id, trade.payable_amount AS trade_payable_amount,
                        delivery.delivered_at
                 FROM refund_orders refund
                 JOIN payment_orders payment ON payment.id = refund.payment_id
@@ -97,7 +105,7 @@ public class RefundService {
                 """, (rs, row) -> new RefundDetail(rs.getLong("id"), rs.getString("refund_no"),
                 rs.getLong("order_id"), rs.getString("issue_type"), rs.getBigDecimal("amount"), rs.getString("status"),
                 rs.getString("provider"), rs.getLong("trade_id"), rs.getLong("user_id"),
-                rs.getBigDecimal("trade_payable_amount"), rs.getObject("delivered_at", LocalDateTime.class)), refundId)
+                rs.getBigDecimal("trade_payable_amount"), rs.getObject("delivered_at", LocalDateTime.class), rs.getLong("payment_id")), refundId)
                 .stream().findFirst().orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "refund request not found"));
         if (!"PENDING".equals(refund.status())) {
             throw new ResponseStatusException(CONFLICT, "refund request has already been reviewed");
@@ -107,16 +115,59 @@ public class RefundService {
                     UPDATE refund_orders SET status = 'REJECTED', reason = CONCAT(reason, '\nReview: ', ?),
                         reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'PENDING'
                     """, reviewNote.trim(), admin.userId(), refund.id());
+            statusLogService.record("REFUND", refund.refundNo(), "PENDING", "REJECTED", "REFUND_REVIEW_REJECTED", admin.userId(), reviewNote, "MANUAL");
             return refund.toView("REJECTED");
         }
         if ("BALANCE".equals(refund.provider())) {
             refundWallet(refund);
+            completeRefund(refund, reviewNote, admin.userId());
+            return refund.toView("REFUND_SUCCESS");
         }
-        tradeJdbcTemplate.update("""
-                UPDATE refund_orders SET status = 'REFUNDED', reason = CONCAT(reason, '\nReview: ', ?),
-                    reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, refunded_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 'PENDING'
-                """, reviewNote.trim(), admin.userId(), refund.id());
+        paymentAdapterFactory.refund().createRefund(refund.paymentId(), refund.orderId(), refund.refundNo(), refund.amount(), "REFUND-" + refund.refundNo(), admin.userId());
+        tradeJdbcTemplate.update("UPDATE refund_orders SET reason = CONCAT(reason, '\nReview: ', ?), reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'MANUAL_PROCESS'", reviewNote.trim(), admin.userId(), refund.id());
+        return refund.toView("MANUAL_PROCESS");
+    }
+
+    @Transactional("tradeTransactionManager")
+    public RefundView completeManualRefund(CurrentUser admin, String refundNo) {
+        paymentAdapterFactory.refund().completeManualRefund(refundNo, admin.userId());
+        RefundDetail refund = findRefund(refundNo);
+        completeRefund(refund, "人工退款完成", admin.userId());
+        return refund.toView("REFUND_SUCCESS");
+    }
+
+    @Transactional("tradeTransactionManager")
+    public RefundView failManualRefund(CurrentUser admin, String refundNo, String reason) {
+        paymentAdapterFactory.refund().failManualRefund(refundNo, admin.userId(), reason);
+        RefundDetail refund = findRefund(refundNo);
+        return refund.toView("REFUND_FAIL");
+    }
+
+    @Transactional("tradeTransactionManager")
+    public RefundView retryManualRefund(CurrentUser admin, String refundNo, String reason) {
+        paymentAdapterFactory.refund().retryManualRefund(refundNo, admin.userId(), reason);
+        return findRefund(refundNo).toView("MANUAL_PROCESS");
+    }
+
+    private void completeRefund(RefundDetail refund, String reviewNote, long operatorId) {
+        Integer existingLedger = tradeJdbcTemplate.queryForObject("SELECT COUNT(*) FROM fee_ledgers WHERE idempotency_key = ?", Integer.class, "REFUND-" + refund.refundNo());
+        if (existingLedger != null && existingLedger > 0) {
+            return;
+        }
+        int updated = tradeJdbcTemplate.update("""
+                UPDATE refund_orders SET status = 'REFUND_SUCCESS', reason = CONCAT(reason, '\nReview: ', ?),
+                    reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, refunded_at = CURRENT_TIMESTAMP,
+                    manual_refund_status = CASE WHEN ? = 'PERSONAL_WECHAT_QR' THEN 'COMPLETED' ELSE manual_refund_status END,
+                    manual_refund_completed_at = CASE WHEN ? = 'PERSONAL_WECHAT_QR' THEN CURRENT_TIMESTAMP ELSE manual_refund_completed_at END,
+                    manual_refund_operator_id = CASE WHEN ? = 'PERSONAL_WECHAT_QR' THEN ? ELSE manual_refund_operator_id END
+                WHERE id = ? AND status IN ('PENDING','MANUAL_PROCESS')
+                """, reviewNote.trim(), operatorId, refund.provider(), refund.provider(), refund.provider(), operatorId, refund.id());
+        if (updated == 0 && !"REFUND_SUCCESS".equals(refund.status())) {
+            return;
+        }
+        if (updated > 0) {
+            statusLogService.record("REFUND", refund.refundNo(), refund.status(), "REFUND_SUCCESS", "REFUND_COMPLETED", operatorId, reviewNote, "MANUAL");
+        }
         tradeJdbcTemplate.update("UPDATE orders SET status = 'REFUNDED' WHERE id = ?", refund.orderId());
         tradeJdbcTemplate.update("""
                 INSERT INTO fee_ledgers (trade_id, order_id, fee_type, amount, direction, reference_type, reference_id, idempotency_key)
@@ -125,7 +176,30 @@ public class RefundService {
         reverseSettlement(refund);
         recordInventoryDisposition(refund);
         rollbackPoints(refund);
-        return refund.toView("REFUNDED");
+        markPaymentRefundedWhenTradeFullyRefunded(refund, operatorId);
+    }
+
+    private void markPaymentRefundedWhenTradeFullyRefunded(RefundDetail refund, long operatorId) {
+        Integer remaining = tradeJdbcTemplate.queryForObject("SELECT COUNT(*) FROM orders WHERE trade_id = ? AND status <> 'REFUNDED'", Integer.class, refund.tradeId());
+        if (remaining != null && remaining == 0) {
+            int updated = tradeJdbcTemplate.update("UPDATE payment_orders SET status = 'REFUNDED' WHERE id = ? AND status = 'PAID'", refund.paymentId());
+            if (updated > 0) {
+                String paymentNo = tradeJdbcTemplate.queryForObject("SELECT payment_no FROM payment_orders WHERE id = ?", String.class, refund.paymentId());
+                statusLogService.record("PAYMENT", paymentNo, "PAID", "REFUNDED", "PAYMENT_FULLY_REFUNDED", operatorId, "交易全部子订单退款成功", "MANUAL");
+            }
+        }
+    }
+
+    private RefundDetail findRefund(String refundNo) {
+        return tradeJdbcTemplate.query("""
+                SELECT refund.id, refund.refund_no, refund.order_id, refund.issue_type, refund.amount, refund.status,
+                       payment.provider, payment.trade_id, orders.user_id, trade.payable_amount AS trade_payable_amount,
+                       payment.id AS payment_id, delivery.delivered_at
+                FROM refund_orders refund JOIN payment_orders payment ON payment.id = refund.payment_id
+                JOIN orders ON orders.id = refund.order_id JOIN trade_orders trade ON trade.id = payment.trade_id
+                LEFT JOIN freshmart_delivery.delivery_tasks delivery ON delivery.order_id = refund.order_id AND delivery.status = 'DELIVERED'
+                WHERE refund.refund_no = ?
+                """, (rs, row) -> new RefundDetail(rs.getLong("id"), rs.getString("refund_no"), rs.getLong("order_id"), rs.getString("issue_type"), rs.getBigDecimal("amount"), rs.getString("status"), rs.getString("provider"), rs.getLong("trade_id"), rs.getLong("user_id"), rs.getBigDecimal("trade_payable_amount"), rs.getObject("delivered_at", LocalDateTime.class), rs.getLong("payment_id")), refundNo).stream().findFirst().orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "refund request not found"));
     }
 
     private void reverseSettlement(RefundDetail refund) {
@@ -215,7 +289,7 @@ public class RefundService {
     }
 
     private record RefundDetail(long id, String refundNo, long orderId, String issueType, BigDecimal amount, String status,
-            String provider, long tradeId, long userId, BigDecimal tradePayableAmount, LocalDateTime deliveredAt) {
+            String provider, long tradeId, long userId, BigDecimal tradePayableAmount, LocalDateTime deliveredAt, long paymentId) {
         private RefundView toView(String targetStatus) {
             return new RefundView(id, refundNo, orderId, issueType, amount, targetStatus, deliveredAt);
         }

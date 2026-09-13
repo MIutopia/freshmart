@@ -1,10 +1,10 @@
 ALTER TABLE freshmart_trade.payment_orders
-  ADD COLUMN IF NOT EXISTS remark_text VARCHAR(120) NULL,
-  ADD COLUMN IF NOT EXISTS payment_proof_url VARCHAR(512) NULL,
-  ADD COLUMN IF NOT EXISTS verified_by BIGINT NULL,
-  ADD COLUMN IF NOT EXISTS verified_at DATETIME NULL,
-  ADD COLUMN IF NOT EXISTS failure_code VARCHAR(48) NULL,
-  ADD COLUMN IF NOT EXISTS failure_message VARCHAR(300) NULL;
+  ADD COLUMN remark_text VARCHAR(120) NULL,
+  ADD COLUMN payment_proof_url VARCHAR(512) NULL,
+  ADD COLUMN verified_by BIGINT NULL,
+  ADD COLUMN verified_at DATETIME NULL,
+  ADD COLUMN failure_code VARCHAR(48) NULL,
+  ADD COLUMN failure_message VARCHAR(300) NULL;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_verifications (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -60,8 +60,8 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_reconciliation_differences (
   KEY idx_reconciliation_status (status, created_at)
 ) ENGINE=InnoDB;
 
-ALTER TABLE freshmart_trade.refund_orders
-  ADD COLUMN IF NOT EXISTS manual_refund_status VARCHAR(24) NULL,
-  ADD COLUMN IF NOT EXISTS manual_refund_completed_at DATETIME NULL,
-  ADD COLUMN IF NOT EXISTS manual_refund_operator_id BIGINT NULL,
-  ADD COLUMN IF NOT EXISTS manual_refund_failure_reason VARCHAR(300) NULL;
+ALTER TABLE freshmart.refund_orders
+  ADD COLUMN manual_refund_status VARCHAR(24) NULL,
+  ADD COLUMN manual_refund_completed_at DATETIME NULL,
+  ADD COLUMN manual_refund_operator_id BIGINT NULL,
+  ADD COLUMN manual_refund_failure_reason VARCHAR(300) NULL;

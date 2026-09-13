@@ -36,10 +36,30 @@ public class RefundController {
     }
 
     @PutMapping("/api/admin/refunds/{refundId}/review")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('OPERATIONS','FINANCE')")
     public RefundService.RefundView review(@AuthenticationPrincipal CurrentUser admin, @PathVariable long refundId,
             @Valid @RequestBody ReviewRequest request) {
         return refundService.review(admin, refundId, request.approved(), request.reviewNote());
+    }
+
+    @PostMapping("/api/admin/refunds/{refundNo}/manual-complete")
+    @PreAuthorize("hasAnyRole('OPERATIONS','FINANCE')")
+    public RefundService.RefundView completeManualRefund(@AuthenticationPrincipal CurrentUser admin, @PathVariable String refundNo) {
+        return refundService.completeManualRefund(admin, refundNo);
+    }
+
+    @PostMapping("/api/admin/refunds/{refundNo}/manual-fail")
+    @PreAuthorize("hasAnyRole('OPERATIONS','FINANCE')")
+    public RefundService.RefundView failManualRefund(@AuthenticationPrincipal CurrentUser admin, @PathVariable String refundNo,
+            @Valid @RequestBody ManualRefundFailureRequest request) {
+        return refundService.failManualRefund(admin, refundNo, request.reason());
+    }
+
+    @PostMapping("/api/admin/refunds/{refundNo}/manual-retry")
+    @PreAuthorize("hasAnyRole('OPERATIONS','FINANCE')")
+    public RefundService.RefundView retryManualRefund(@AuthenticationPrincipal CurrentUser admin, @PathVariable String refundNo,
+            @Valid @RequestBody ManualRefundFailureRequest request) {
+        return refundService.retryManualRefund(admin, refundNo, request.reason());
     }
 
     public record RefundRequest(@Positive long orderId, @NotBlank String issueType,
@@ -47,5 +67,8 @@ public class RefundController {
     }
 
     public record ReviewRequest(boolean approved, @NotBlank String reviewNote) {
+    }
+
+    public record ManualRefundFailureRequest(@NotBlank String reason) {
     }
 }

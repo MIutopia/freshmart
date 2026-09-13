@@ -1,6 +1,7 @@
 package com.freshmart.trade;
 
 import java.util.List;
+import com.freshmart.payment.FinancialStatusLogService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -11,11 +12,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryReservationExpiryJob {
     private final JdbcTemplate jdbcTemplate;
     private final JdbcTemplate userJdbcTemplate;
+    private final FinancialStatusLogService statusLogService;
 
     public InventoryReservationExpiryJob(@Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
-            @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate) {
+            @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate,
+            FinancialStatusLogService statusLogService) {
         this.jdbcTemplate = jdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
+        this.statusLogService = statusLogService;
     }
 
     @Scheduled(fixedDelayString = "${commerce.inventory-release-interval-ms:60000}")
@@ -46,7 +50,10 @@ public class InventoryReservationExpiryJob {
             for (Long tradeId : tradeIds) {
                 jdbcTemplate.update("UPDATE trade_orders SET status = 'CANCELLED' WHERE id = ? AND status = 'PENDING_PAYMENT'", tradeId);
                 jdbcTemplate.update("UPDATE orders SET status = 'CANCELLED' WHERE trade_id = ? AND status = 'PENDING_PAYMENT'", tradeId);
-                jdbcTemplate.update("UPDATE payment_orders SET status = 'EXPIRED' WHERE trade_id = ? AND status = 'PENDING'", tradeId);
+                List<PaymentState> payments = jdbcTemplate.query("SELECT payment_no, status FROM payment_orders WHERE trade_id = ? AND status IN ('PENDING', 'PROOF_SUBMITTED') FOR UPDATE",
+                        (rs, row) -> new PaymentState(rs.getString(1), rs.getString(2)), tradeId);
+                jdbcTemplate.update("UPDATE payment_orders SET status = 'CANCELLED', failure_code = 'PAYMENT_TIMEOUT', failure_message = '库存预占超时，支付单已取消' WHERE trade_id = ? AND status IN ('PENDING', 'PROOF_SUBMITTED')", tradeId);
+                payments.forEach(payment -> statusLogService.record("PAYMENT", payment.paymentNo(), payment.status(), "CANCELLED", "PAYMENT_TIMEOUT_CANCELLED", null, "库存预占超时", "SYSTEM"));
                 userJdbcTemplate.update("""
                         UPDATE user_coupons SET status = 'AVAILABLE', used_trade_id = NULL
                         WHERE used_trade_id = ? AND status = 'RESERVED'
@@ -70,6 +77,9 @@ public class InventoryReservationExpiryJob {
     }
 
     private record Reservation(long id, long tradeId, long productId, long batchId, int grams) {
+    }
+
+    private record PaymentState(String paymentNo, String status) {
     }
 
     private record FlashReservation(long id, long flashSaleId, int grams) {

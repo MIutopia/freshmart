@@ -44,7 +44,7 @@ public class MerchantDashboardService {
         BigDecimal refundAmount = tradeJdbcTemplate.query("""
                 SELECT COALESCE(SUM(refund.amount), 0) FROM refund_orders refund
                 JOIN orders ON orders.id = refund.order_id
-                WHERE orders.merchant_id = ? AND refund.status = 'REFUNDED'
+                WHERE orders.merchant_id = ? AND refund.status = 'REFUND_SUCCESS'
                   AND DATE(refund.refunded_at) >= ? AND DATE(refund.refunded_at) <= ?
                 """, (rs, row) -> rs.getBigDecimal(1), merchantId, from, to).stream().findFirst().orElse(BigDecimal.ZERO);
         int warningThreshold = platformRuleService.integerOrDefault("inventory.warning.threshold.grams", 2000);
