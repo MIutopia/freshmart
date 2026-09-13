@@ -16,12 +16,40 @@ export interface WeighingAdjustment {
   createdAt: string
 }
 
+/** 对应后端 WeighingAdjustmentService.WeighingSheetItem */
+export interface WeighingSheetItem {
+  orderItemId: number
+  productName: string
+  prepaidGrams: number
+  prepaidGoodsAmount: number
+  actualGrams: number | null
+  actualGoodsAmount: number | null
+  weighedAt: string | null
+}
+
+/** 对应后端 WeighingAdjustmentService.WeighingSheetView */
+export interface WeighingSheet {
+  orderId: number
+  status: string
+  prepaidGoodsAmount: number
+  items: WeighingSheetItem[]
+}
+
 export const weighingApi = {
+  /** 逐项称重前取订单项与预估克数 */
+  sheet: (orderId: number) => http.get<WeighingSheet>(`/merchant/orders/${orderId}/weighing-sheet`),
+
   /**
-   * 提交实际称重结果。actualGrams 为实际称重净重克数，填写后会把与预估克数的差额回补到批次库存；
-   * 缺省时只结算金额、不动库存。金额差额在平台误差上限内由平台承担，超过上限转人工复核。
-   * 每个订单只允许一条称重调整记录。
+   * 提交称重结果。
+   * 逐项模式（items）：整单实际金额与克数由各项汇总，并按订单项各自回补批次库存；
+   * 整单模式（actualGrams/actualGoodsAmount）：按订单整体比例分摊，缺省克数时只结算金额。
+   * 金额差额在平台误差上限内由平台承担，低于预估退回用户；超过上限转人工复核。
    */
-  submit: (body: { orderId: number; actualGoodsAmount: number; actualGrams?: number; note?: string }) =>
-    http.post<WeighingAdjustment>('/weighing-adjustments', { body, idempotent: true })
+  submit: (body: {
+    orderId: number
+    actualGoodsAmount?: number
+    actualGrams?: number
+    items?: Array<{ orderItemId: number; actualGrams: number; actualGoodsAmount: number }>
+    note?: string
+  }) => http.post<WeighingAdjustment>('/weighing-adjustments', { body, idempotent: true })
 }

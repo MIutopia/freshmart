@@ -228,6 +228,41 @@ if ($newOrder) {
     }
 }
 
+# 逐项称重：每个订单只允许一条称重记录，因此另开一单验证订单项粒度的克数回补
+$trade2 = Invoke-Step 'create second trade' {
+    ApiSend 'POST' '/api/trades' $consumerToken @{
+        deliveryZoneId = $zone.id
+        addressSnapshot = @{ contactName = 'E2E Receiver'; phone = '13800000000'; detail = 'E2E building 1-102' }
+        lines = @(@{ productId = $product.id; weightGrams = 1000 })
+        pointsToRedeem = 0
+    }
+}
+if ($trade2) {
+    Invoke-Step 'prepay second trade' { ApiSend 'POST' ("/api/payments/" + $trade2.tradeNo + "/prepay") $consumerToken $null } | Out-Null
+    Invoke-Step 'submit second payment proof' { ApiSend 'POST' ("/api/payments/" + $trade2.tradeNo + "/proof") $consumerToken @{ proofUrl = $evidenceUrl; remarkText = $trade2.tradeNo } } | Out-Null
+    Invoke-Step 'confirm second qr payment' { ApiSend 'POST' ("/api/admin/payments/" + $trade2.tradeNo + "/confirm-personal-wechat-qr") $adminToken $null } | Out-Null
+    $orders2 = Invoke-Step 'consumer order list after second trade' { ApiGet '/api/orders' $consumerToken }
+    $secondOrder = $orders2 | Where-Object { $trade2.orderNos -contains $_.orderNo } | Select-Object -First 1
+    Report 'second order created' ($null -ne $secondOrder) 'no order matched second trade orderNos'
+    if ($secondOrder) {
+        $sheet = Invoke-Step 'weighing sheet' { ApiGet ("/api/merchant/orders/" + $secondOrder.id + "/weighing-sheet") $merchantToken }
+        Report 'weighing sheet lists order items' ($sheet -and @($sheet.items).Count -gt 0) 'weighing sheet returned no items'
+        if ($sheet -and @($sheet.items).Count -gt 0) {
+            $firstItem = @($sheet.items)[0]
+            $itemWeighed = Invoke-Step 'submit item weighing' {
+                ApiSend 'POST' '/api/weighing-adjustments' $merchantToken @{
+                    orderId = $secondOrder.id
+                    items = @(@{ orderItemId = $firstItem.orderItemId; actualGrams = 1200; actualGoodsAmount = 11.40 })
+                    note = 'E2E item weighing'
+                }
+            }
+            if ($itemWeighed) {
+                Report 'item weighing returns gram difference' ($itemWeighed.inventoryAdjustGrams -eq 200) ('item inventory adjust grams = ' + $itemWeighed.inventoryAdjustGrams)
+            }
+        }
+    }
+}
+
 Write-Host '===== 5. after-sale refund =====' -ForegroundColor Cyan
 $deliveredOrder = $newOrder
 if ($deliveredOrder) {

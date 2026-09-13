@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { orderApi, type OrderView } from '../../api/trade'
-import { weighingApi } from '../../api/weighing'
+import { weighingApi, type WeighingSheet } from '../../api/weighing'
 import { errorMessage } from '../../api/http'
 
 const orders = ref<OrderView[]>([])
@@ -11,8 +11,26 @@ const loading = ref(false)
 
 const weighVisible = ref(false)
 const weighing = ref(false)
+const sheetLoading = ref(false)
 const weighedOrder = ref<OrderView | null>(null)
-const weighForm = ref({ actualGoodsAmount: '', actualGrams: '', note: '' })
+const sheet = ref<WeighingSheet | null>(null)
+/** 以 orderItemId 为键，避免表格重排后录入值与订单项错位 */
+const itemInputs = ref<Record<number, { actualGrams: string; actualGoodsAmount: string }>>({})
+const weighNote = ref('')
+
+const totals = computed(() => {
+  if (!sheet.value) return { grams: 0, amount: 0 }
+  let grams = 0
+  let amount = 0
+  for (const item of sheet.value.items) {
+    const input = itemInputs.value[item.orderItemId]
+    const itemGrams = Number(input?.actualGrams ?? '')
+    const itemAmount = Number(input?.actualGoodsAmount ?? '')
+    if (Number.isFinite(itemGrams)) grams += itemGrams
+    if (Number.isFinite(itemAmount)) amount += itemAmount
+  }
+  return { grams, amount: Math.round(amount * 100) / 100 }
+})
 
 async function load() {
   loading.value = true
@@ -31,36 +49,60 @@ function canWeigh(row: OrderView) {
   return ['WAITING_PICKING', 'PICKED', 'DELIVERED'].includes(row.status)
 }
 
-function openWeigh(row: OrderView) {
+async function openWeigh(row: OrderView) {
   weighedOrder.value = row
-  weighForm.value = {
-    actualGoodsAmount: row.actualGoodsAmount === null ? '' : String(row.actualGoodsAmount),
-    actualGrams: '',
-    note: ''
-  }
+  sheet.value = null
+  itemInputs.value = {}
+  weighNote.value = ''
   weighVisible.value = true
+  sheetLoading.value = true
+  try {
+    const result = await weighingApi.sheet(row.id)
+    sheet.value = result
+    const inputs: Record<number, { actualGrams: string; actualGoodsAmount: string }> = {}
+    for (const item of result.items) {
+      inputs[item.orderItemId] = {
+        actualGrams: item.actualGrams === null ? '' : String(item.actualGrams),
+        actualGoodsAmount: item.actualGoodsAmount === null ? '' : String(item.actualGoodsAmount)
+      }
+    }
+    itemInputs.value = inputs
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
+  } finally {
+    sheetLoading.value = false
+  }
 }
 
 async function submitWeigh() {
   const order = weighedOrder.value
-  if (!order) return
-  const amount = Number(weighForm.value.actualGoodsAmount)
-  if (!weighForm.value.actualGoodsAmount || !Number.isFinite(amount) || amount < 0) {
-    ElMessage.warning('实际商品金额必填且不能为负')
+  const current = sheet.value
+  if (!order || !current) return
+  if (current.items.length === 0) {
+    ElMessage.warning('该订单没有可称重的订单项')
     return
   }
-  const grams = weighForm.value.actualGrams ? Number(weighForm.value.actualGrams) : undefined
-  if (grams !== undefined && (!Number.isFinite(grams) || grams <= 0)) {
-    ElMessage.warning('实际克数必须为正整数')
-    return
+  const items = []
+  for (const item of current.items) {
+    const input = itemInputs.value[item.orderItemId]
+    const grams = Number(input?.actualGrams ?? '')
+    const amount = Number(input?.actualGoodsAmount ?? '')
+    if (!Number.isFinite(grams) || grams <= 0) {
+      ElMessage.warning(`${item.productName} 的实际克数必须为正整数`)
+      return
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      ElMessage.warning(`${item.productName} 的实际金额不能为负`)
+      return
+    }
+    items.push({ orderItemId: item.orderItemId, actualGrams: grams, actualGoodsAmount: amount })
   }
   weighing.value = true
   try {
     const result = await weighingApi.submit({
       orderId: order.id,
-      actualGoodsAmount: amount,
-      actualGrams: grams,
-      note: weighForm.value.note.trim() || undefined
+      items,
+      note: weighNote.value.trim() || undefined
     })
     const gramsHint = result.inventoryAdjustGrams === 0
       ? '未调整库存'
@@ -83,7 +125,7 @@ onMounted(load)
     <header class="page-head">
       <h2>订单处理</h2>
       <span class="sub">
-        仅显示本商家的子订单；称重调整需填写实际净重克数，未填写时只结算金额、不回补库存
+        仅显示本商家的子订单；称重按订单项录入实际净重与金额，克数差额会逐项回补批次库存
       </span>
     </header>
 
@@ -120,7 +162,7 @@ onMounted(load)
         <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" size="small" :disabled="!canWeigh(row)" @click="openWeigh(row)">
-              称重调整
+              逐项称重
             </el-button>
           </template>
         </el-table-column>
@@ -128,24 +170,45 @@ onMounted(load)
       </el-table>
     </el-card>
 
-    <el-dialog v-model="weighVisible" title="称重调整" width="460px">
+    <el-dialog v-model="weighVisible" title="逐项称重" width="720px">
       <el-form label-position="top">
         <el-form-item label="子订单">
           <el-input :model-value="weighedOrder?.orderNo ?? ''" disabled />
         </el-form-item>
-        <el-form-item label="预估商品金额">
-          <el-input :model-value="weighedOrder ? `¥${weighedOrder.payableAmount}` : ''" disabled />
-        </el-form-item>
-        <el-form-item label="实际商品金额" required>
-          <el-input v-model="weighForm.actualGoodsAmount" placeholder="拣货称重后的实际金额" />
-        </el-form-item>
-        <el-form-item label="实际净重克数">
-          <el-input v-model="weighForm.actualGrams" placeholder="选填；填写后回补批次库存差额" />
-        </el-form-item>
+      </el-form>
+
+      <el-table v-loading="sheetLoading" :data="sheet?.items ?? []" size="small" border>
+        <el-table-column prop="productName" label="商品" min-width="140" />
+        <el-table-column label="预估克数" width="100">
+          <template #default="{ row }">{{ row.prepaidGrams }}</template>
+        </el-table-column>
+        <el-table-column label="预估金额" width="100">
+          <template #default="{ row }">¥{{ row.prepaidGoodsAmount }}</template>
+        </el-table-column>
+        <el-table-column label="实际克数" width="130">
+          <template #default="{ row }">
+            <el-input v-model="itemInputs[row.orderItemId].actualGrams" size="small" placeholder="净重" />
+          </template>
+        </el-table-column>
+        <el-table-column label="实际金额" width="130">
+          <template #default="{ row }">
+            <el-input v-model="itemInputs[row.orderItemId].actualGoodsAmount" size="small" placeholder="金额" />
+          </template>
+        </el-table-column>
+        <template #empty>该订单没有可称重的订单项</template>
+      </el-table>
+
+      <div class="merchant-orders__totals">
+        <span>合计：{{ totals.grams }} 克 / ¥{{ totals.amount }}</span>
+        <span class="merchant-orders__hint">预估：¥{{ sheet?.prepaidGoodsAmount ?? '—' }}</span>
+      </div>
+
+      <el-form label-position="top">
         <el-form-item label="备注">
-          <el-input v-model="weighForm.note" placeholder="选填" />
+          <el-input v-model="weighNote" placeholder="选填" />
         </el-form-item>
       </el-form>
+
       <el-alert
         type="info"
         :closable="false"
@@ -154,7 +217,9 @@ onMounted(load)
       />
       <template #footer>
         <el-button @click="weighVisible = false">取消</el-button>
-        <el-button type="primary" :loading="weighing" @click="submitWeigh">提交</el-button>
+        <el-button type="primary" :loading="weighing" :disabled="sheetLoading || !sheet" @click="submitWeigh">
+          提交
+        </el-button>
       </template>
     </el-dialog>
   </section>
@@ -177,6 +242,19 @@ onMounted(load)
     justify-content: space-between;
     font-size: 13px;
     color: $text-secondary;
+  }
+
+  &__totals {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 14px 0;
+    font-size: 13px;
+    color: $text-secondary;
+  }
+
+  &__hint {
+    color: $text-muted;
   }
 }
 </style>

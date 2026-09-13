@@ -434,11 +434,14 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.order_items (
   product_name_snapshot VARCHAR(160) NOT NULL,
   warehouse_id BIGINT NOT NULL,
   weight_grams INT NOT NULL,
+  actual_weight_grams INT NULL,
   market_price_per_kg DECIMAL(10,2) NOT NULL,
   merchant_price_per_kg DECIMAL(10,2) NOT NULL,
   user_price_per_kg DECIMAL(10,2) NOT NULL,
   merchant_gross_amount DECIMAL(10,2) NOT NULL,
   user_goods_amount DECIMAL(10,2) NOT NULL,
+  actual_goods_amount DECIMAL(10,2) NULL,
+  weighed_at DATETIME NULL,
   platform_price_subsidy_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   batch_promotion_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   flash_sale_id BIGINT NULL,
@@ -446,6 +449,22 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.order_items (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_order_item_order (order_id),
   KEY idx_order_item_product (product_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.order_item_weighings (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_id BIGINT NOT NULL,
+  order_item_id BIGINT NOT NULL,
+  adjustment_id VARCHAR(96) NOT NULL,
+  prepaid_grams INT NOT NULL,
+  actual_grams INT NOT NULL,
+  prepaid_goods_amount DECIMAL(10,2) NOT NULL,
+  actual_goods_amount DECIMAL(10,2) NOT NULL,
+  inventory_adjust_grams INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_item_weighing (order_item_id),
+  KEY idx_item_weighing_order (order_id),
+  KEY idx_item_weighing_adjustment (adjustment_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_merchant.flash_sale_items (
