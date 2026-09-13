@@ -87,6 +87,16 @@ public class CatalogController {
         return catalogService.listCategories();
     }
 
+    @PutMapping("/api/admin/categories/{categoryId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public CatalogService.CategoryView updateCategory(@PathVariable long categoryId,
+            @Valid @RequestBody UpdateCategoryRequest request) {
+        return catalogService.updateCategory(categoryId, request.name(), request.sortOrder(), request.status());
+    }
+
+    public record UpdateCategoryRequest(@NotBlank String name, int sortOrder, @NotBlank String status) {
+    }
+
     @GetMapping("/api/catalog/products")
     public List<CatalogService.ProductView> listProducts(@RequestParam(required = false) Long categoryId) {
         return catalogService.listProducts(categoryId);

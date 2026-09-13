@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
@@ -44,9 +45,36 @@ public class CatalogService {
 
     public List<CategoryView> listCategories() {
         return jdbcTemplate.query("""
-                SELECT id, parent_id, name, sort_order FROM product_categories ORDER BY sort_order, id
+                SELECT id, parent_id, name, sort_order, status FROM product_categories ORDER BY sort_order, id
                 """, (rs, row) -> new CategoryView(rs.getLong("id"), (Long) rs.getObject("parent_id"),
-                rs.getString("name"), rs.getInt("sort_order")));
+                rs.getString("name"), rs.getInt("sort_order"), rs.getString("status")));
+    }
+
+    @Transactional("merchantTransactionManager")
+    public CategoryView updateCategory(long categoryId, String name, int sortOrder, String status) {
+        if (!"ACTIVE".equals(status) && !"INACTIVE".equals(status)) {
+            throw new ResponseStatusException(BAD_REQUEST, "status must be ACTIVE or INACTIVE");
+        }
+        if (!exists("SELECT 1 FROM product_categories WHERE id = ?", categoryId)) {
+            throw new ResponseStatusException(NOT_FOUND, "category not found");
+        }
+        // 停用前必须没有在架商品继续引用该分类，否则商品与分类状态会不一致
+        if ("INACTIVE".equals(status)
+                && exists("SELECT 1 FROM products WHERE category_id = ? AND status = 'ACTIVE'", categoryId)) {
+            throw new ResponseStatusException(CONFLICT, "category still has active products");
+        }
+        jdbcTemplate.update("UPDATE product_categories SET name = ?, sort_order = ?, status = ? WHERE id = ?",
+                name, sortOrder, status, categoryId);
+        return findCategory(categoryId);
+    }
+
+    private CategoryView findCategory(long categoryId) {
+        return jdbcTemplate.query("""
+                SELECT id, parent_id, name, sort_order, status FROM product_categories WHERE id = ?
+                """, (rs, row) -> new CategoryView(rs.getLong("id"), (Long) rs.getObject("parent_id"),
+                rs.getString("name"), rs.getInt("sort_order"), rs.getString("status")), categoryId)
+                .stream().findFirst()
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "category not found"));
     }
 
     @Transactional("merchantTransactionManager")
@@ -241,6 +269,6 @@ public class CatalogService {
             String address, String status) {
     }
 
-    public record CategoryView(long id, Long parentId, String name, int sortOrder) {
+    public record CategoryView(long id, Long parentId, String name, int sortOrder, String status) {
     }
 }

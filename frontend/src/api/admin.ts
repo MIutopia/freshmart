@@ -20,6 +20,7 @@ export interface CategoryView {
   parentId: number | null
   name: string
   sortOrder: number
+  status: string
 }
 
 /** 对应后端 DeliveryService.DeliveryZoneView */
@@ -79,6 +80,9 @@ export const adminApi = {
   listCategories: () => http.get<CategoryView[]>('/admin/categories'),
   createCategory: (body: { parentId?: number; name: string; sortOrder: number }) =>
     http.post<{ id: number }>('/admin/categories', { body }),
+  /** 停用前必须没有在架商品引用该分类，否则后端返回 409 */
+  updateCategory: (categoryId: number, body: { name: string; sortOrder: number; status: string }) =>
+    http.put<CategoryView>(`/admin/categories/${categoryId}`, { body }),
 
   // 配送区域与派单
   deliveryZones: () => http.get<DeliveryZoneView[]>('/admin/delivery-zones'),

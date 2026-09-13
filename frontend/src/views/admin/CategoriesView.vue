@@ -8,7 +8,12 @@ import { errorMessage } from '../../api/http'
 const categories = ref<CategoryView[]>([])
 const loading = ref(false)
 const creating = ref(false)
+const saving = ref(false)
+
 const form = ref({ parentId: '', name: '', sortOrder: '0' })
+
+const editVisible = ref(false)
+const editForm = ref({ id: 0, name: '', sortOrder: '0', status: 'ACTIVE' })
 
 async function load() {
   loading.value = true
@@ -43,6 +48,54 @@ async function createCategory() {
   }
 }
 
+function openEdit(row: CategoryView) {
+  editForm.value = {
+    id: row.id,
+    name: row.name,
+    sortOrder: String(row.sortOrder),
+    status: row.status
+  }
+  editVisible.value = true
+}
+
+async function saveEdit() {
+  if (!editForm.value.name.trim()) {
+    ElMessage.warning('分类名称必填')
+    return
+  }
+  saving.value = true
+  try {
+    await adminApi.updateCategory(editForm.value.id, {
+      name: editForm.value.name.trim(),
+      sortOrder: Number(editForm.value.sortOrder || 0),
+      status: editForm.value.status
+    })
+    ElMessage.success('分类已更新')
+    editVisible.value = false
+    await load()
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
+  } finally {
+    saving.value = false
+  }
+}
+
+/** 停用走同一更新接口；分类下仍有在架商品时后端拒绝并返回冲突 */
+async function toggleStatus(row: CategoryView) {
+  const next = row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
+  try {
+    await adminApi.updateCategory(row.id, {
+      name: row.name,
+      sortOrder: row.sortOrder,
+      status: next
+    })
+    ElMessage.success(next === 'ACTIVE' ? '分类已启用' : '分类已停用')
+    await load()
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -50,7 +103,9 @@ onMounted(load)
   <section class="categories">
     <header class="page-head">
       <h2>商品分类</h2>
-      <span class="sub">分类是商品上架与仓库经营范围的基础；未配置分类仓配规则的商品不可上架</span>
+      <span class="sub">
+        分类是商品上架与仓库经营范围的基础；停用前需先下架该分类下的全部商品
+      </span>
     </header>
 
     <div class="categories__grid">
@@ -81,16 +136,57 @@ onMounted(load)
           </div>
         </template>
         <el-table v-loading="loading" :data="categories" size="small">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="name" label="名称" min-width="140" />
-          <el-table-column label="父分类" width="100">
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column prop="name" label="名称" min-width="130" />
+          <el-table-column label="父分类" width="90">
             <template #default="{ row }">{{ row.parentId ?? '一级' }}</template>
           </el-table-column>
-          <el-table-column prop="sortOrder" label="排序" width="90" />
+          <el-table-column prop="sortOrder" label="排序" width="80" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" effect="light" :type="row.status === 'ACTIVE' ? 'success' : 'info'">
+                {{ row.status }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button
+                text
+                size="small"
+                :type="row.status === 'ACTIVE' ? 'danger' : 'success'"
+                @click="toggleStatus(row)"
+              >
+                {{ row.status === 'ACTIVE' ? '停用' : '启用' }}
+              </el-button>
+            </template>
+          </el-table-column>
           <template #empty>暂无分类</template>
         </el-table>
       </el-card>
     </div>
+
+    <el-dialog v-model="editVisible" title="编辑分类" width="460px">
+      <el-form label-position="top">
+        <el-form-item label="分类名称" required>
+          <el-input v-model="editForm.name" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input v-model="editForm.sortOrder" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="editForm.status">
+            <el-option label="启用 ACTIVE" value="ACTIVE" />
+            <el-option label="停用 INACTIVE" value="INACTIVE" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -102,7 +198,7 @@ onMounted(load)
 
   &__grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
     gap: 16px;
   }
 

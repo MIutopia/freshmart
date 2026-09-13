@@ -30,6 +30,16 @@ function Invoke-Step([string]$name, [scriptblock]$action) {
     }
 }
 
+# 反向用例：断言请求必须被拒绝（例如停用仍有在架商品的分类）
+function Invoke-ExpectFailure([string]$name, [scriptblock]$action) {
+    try {
+        & $action | Out-Null
+        Report $name $false 'expected rejection but request succeeded'
+    } catch {
+        Report $name $true ''
+    }
+}
+
 function Login([string]$loginName) {
     $body = @{ loginName = $loginName; password = $password } | ConvertTo-Json
     return (Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20).accessToken
@@ -93,6 +103,10 @@ Write-Host ("riderUserId = " + $riderUserId) -ForegroundColor DarkGray
 Write-Host '===== 1. platform config (admin) =====' -ForegroundColor Cyan
 $stamp = Get-Date -Format 'HHmmss'
 $category = Invoke-Step 'create category' { ApiSend 'POST' '/api/admin/categories' $adminToken @{ name = "E2E-Category-$stamp"; sortOrder = 1 } }
+$categoryRenamed = Invoke-Step 'update category' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'ACTIVE' } }
+Report 'category rename persisted' ($categoryRenamed.name -eq "E2E-Category-$stamp-v2") 'name not updated'
+Invoke-Step 'deactivate category without products' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'INACTIVE' } } | Out-Null
+Invoke-Step 'reactivate category' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'ACTIVE' } } | Out-Null
 $zone = Invoke-Step 'create delivery zone' { ApiSend 'POST' '/api/admin/delivery-zones' $adminToken @{ name = "E2E-Zone-$stamp"; areaCode = "E2E-$stamp" } }
 $categories = Invoke-Step 'list categories' { ApiGet '/api/admin/categories' $adminToken }
 $zones = Invoke-Step 'list delivery zones' { ApiGet '/api/admin/delivery-zones' $adminToken }
@@ -189,6 +203,11 @@ if ($deliveredOrder) {
         Invoke-Step 'refund ai suggestion' { ApiSend 'POST' ("/api/admin/refunds/" + $refund.refundNo + "/ai-review-suggestion") $adminToken $null } | Out-Null
         Invoke-Step 'review refund' { ApiSend 'PUT' ("/api/admin/refunds/" + $refund.id + "/review") $adminToken @{ approved = $true; reviewNote = 'E2E review approved' } } | Out-Null
     }
+}
+
+# 此时该分类下已有在架商品，停用必须被拒绝
+Invoke-ExpectFailure 'deactivate category with active products is rejected' {
+    ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'INACTIVE' }
 }
 
 Write-Host '===== 6. settlement and operations =====' -ForegroundColor Cyan
