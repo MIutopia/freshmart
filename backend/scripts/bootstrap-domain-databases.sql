@@ -258,12 +258,14 @@ CREATE TABLE IF NOT EXISTS freshmart_merchant.api_access_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   api_client_id BIGINT NOT NULL,
   request_id VARCHAR(64) NOT NULL,
+  request_nonce VARCHAR(64) NULL,
   method VARCHAR(12) NOT NULL,
   path VARCHAR(255) NOT NULL,
   response_status INT NOT NULL,
   duration_ms INT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_api_log_client_created (api_client_id, created_at)
+  KEY idx_api_log_client_created (api_client_id, created_at),
+  UNIQUE KEY uk_api_log_client_nonce (api_client_id, request_nonce)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_merchant.membership_levels (

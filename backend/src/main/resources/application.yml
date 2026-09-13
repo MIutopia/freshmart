@@ -54,6 +54,8 @@ management:
 ai:
   gateway:
     base-url: ${AI_GATEWAY_BASE_URL:http://localhost:8090}
+open-api:
+  signature-max-age-seconds: ${OPEN_API_SIGNATURE_MAX_AGE_SECONDS:300}
 commerce:
   capacity:
     daily-order-target: ${CAPACITY_DAILY_ORDER_TARGET:50}
