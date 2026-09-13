@@ -41,7 +41,9 @@ public class AiAssistantService {
         List<ProductView> products = merchantJdbcTemplate.query("""
                 SELECT product.id, product.name, product.description, product.market_price_per_kg,
                        product.merchant_price_per_kg, COALESCE(SUM(GREATEST(batch.available_grams - batch.reserved_grams, 0)), 0) available_grams
-                FROM products product LEFT JOIN inventory_batches batch ON batch.product_id = product.id
+                FROM products product
+                JOIN merchants merchant ON merchant.id = product.merchant_id AND merchant.status = 'ACTIVE'
+                LEFT JOIN inventory_batches batch ON batch.product_id = product.id
                 WHERE product.status = 'ACTIVE' GROUP BY product.id, product.name, product.description,
                     product.market_price_per_kg, product.merchant_price_per_kg
                 HAVING available_grams > 0 ORDER BY product.id DESC LIMIT 5
@@ -49,7 +51,7 @@ public class AiAssistantService {
                 rs.getString("description"), rs.getBigDecimal("market_price_per_kg"),
                 rs.getBigDecimal("merchant_price_per_kg"), rs.getInt("available_grams")));
         String context = products.stream()
-                .map(product -> "%s|库存%d克|商家价%.2f元/千克".formatted(product.name(), product.availableGrams(), product.merchantPricePerKg()))
+                .map(product -> "%s|库存%d克|用户价%.2f元/千克".formatted(product.name(), product.availableGrams(), product.userPricePerKg()))
                 .collect(Collectors.joining("; "));
         String answer = deepSeekClient.chat(
                 "你是生鲜商城导购。只能基于给定商品数据回答，不能编造库存、价格、优惠或承诺下单。回答使用简体中文，控制在120字以内。",
@@ -75,7 +77,11 @@ public class AiAssistantService {
 
     public record AssistantReply(String intent, String answer, List<ProductView> products, List<OrderView> orders) { }
     public record ProductView(long productId, String name, String description, BigDecimal marketPricePerKg,
-            BigDecimal merchantPricePerKg, int availableGrams) { }
+            BigDecimal merchantPricePerKg, int availableGrams) {
+        public BigDecimal userPricePerKg() {
+            return merchantPricePerKg.min(marketPricePerKg);
+        }
+    }
     public record OrderView(String orderNo, String status, BigDecimal payableAmount,
             java.time.LocalDateTime createdAt) { }
 }
