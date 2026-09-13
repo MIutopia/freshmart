@@ -489,12 +489,93 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
   payment_mode VARCHAR(24) NOT NULL DEFAULT 'MANUAL_CONFIRMATION',
   provider_transaction_id VARCHAR(64) NULL UNIQUE,
   code_url VARCHAR(512) NULL,
+  remark_text VARCHAR(120) NULL,
+  payment_proof_url VARCHAR(512) NULL,
+  verified_by BIGINT NULL,
+  verified_at DATETIME NULL,
+  failure_code VARCHAR(48) NULL,
+  failure_message VARCHAR(300) NULL,
   amount DECIMAL(10,2) NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
   idempotency_key VARCHAR(80) NOT NULL UNIQUE,
   paid_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_payment_trade_status (trade_id, status)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.payment_verifications (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  payment_id BIGINT NOT NULL,
+  verification_type VARCHAR(24) NOT NULL,
+  submitted_by BIGINT NULL,
+  amount DECIMAL(10,2) NULL,
+  remark_text VARCHAR(120) NULL,
+  proof_url VARCHAR(512) NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  failure_code VARCHAR(48) NULL,
+  failure_message VARCHAR(300) NULL,
+  verified_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_payment_verification_status (payment_id, status, created_at),
+  CONSTRAINT fk_payment_verification_payment
+    FOREIGN KEY (payment_id) REFERENCES freshmart_trade.payment_orders(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.payment_bill_imports (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  import_no VARCHAR(40) NOT NULL UNIQUE,
+  file_name VARCHAR(255) NULL,
+  imported_by BIGINT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'PROCESSING',
+  total_entries INT NOT NULL DEFAULT 0,
+  matched_entries INT NOT NULL DEFAULT 0,
+  difference_entries INT NOT NULL DEFAULT 0,
+  imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME NULL,
+  KEY idx_bill_import_status (status, imported_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.payment_bill_entries (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  import_id BIGINT NOT NULL,
+  provider_transaction_id VARCHAR(64) NULL,
+  transaction_time DATETIME NULL,
+  remark_text VARCHAR(255) NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  direction VARCHAR(8) NOT NULL,
+  matched_payment_id BIGINT NULL,
+  match_status VARCHAR(24) NOT NULL DEFAULT 'UNMATCHED',
+  mismatch_reason VARCHAR(300) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_bill_entry_import (import_id, match_status),
+  KEY idx_bill_entry_payment (matched_payment_id),
+  CONSTRAINT fk_bill_entry_import
+    FOREIGN KEY (import_id) REFERENCES freshmart_trade.payment_bill_imports(id),
+  CONSTRAINT fk_bill_entry_payment
+    FOREIGN KEY (matched_payment_id) REFERENCES freshmart_trade.payment_orders(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.payment_reconciliation_differences (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  import_id BIGINT NOT NULL,
+  entry_id BIGINT NULL,
+  payment_id BIGINT NULL,
+  difference_type VARCHAR(32) NOT NULL,
+  expected_amount DECIMAL(10,2) NULL,
+  actual_amount DECIMAL(10,2) NULL,
+  detail VARCHAR(500) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'OPEN',
+  resolved_by BIGINT NULL,
+  resolved_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_reconciliation_import (import_id, status, created_at),
+  KEY idx_reconciliation_payment (payment_id),
+  CONSTRAINT fk_reconciliation_import
+    FOREIGN KEY (import_id) REFERENCES freshmart_trade.payment_bill_imports(id),
+  CONSTRAINT fk_reconciliation_entry
+    FOREIGN KEY (entry_id) REFERENCES freshmart_trade.payment_bill_entries(id),
+  CONSTRAINT fk_reconciliation_payment
+    FOREIGN KEY (payment_id) REFERENCES freshmart_trade.payment_orders(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.refund_orders (
@@ -508,6 +589,10 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.refund_orders (
   evidence_images_json JSON NOT NULL,
   amount DECIMAL(10,2) NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  manual_refund_status VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUIRED',
+  manual_refund_completed_at DATETIME NULL,
+  manual_refund_operator_id BIGINT NULL,
+  manual_refund_failure_reason VARCHAR(300) NULL,
   review_mode VARCHAR(24) NOT NULL DEFAULT 'CUSTOMER_SERVICE_AI',
   reviewed_by BIGINT NULL,
   reviewed_at DATETIME NULL,
