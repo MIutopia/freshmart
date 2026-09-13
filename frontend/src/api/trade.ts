@@ -68,10 +68,6 @@ export interface ReconciliationDifferenceView {
   createdAt: string
 }
 
-export const cartApi = {
-  putItem: (body: { productId: number; weightGrams: number }) => http.put<void>('/carts/items', { body })
-}
-
 export const tradeApi = {
   /** 创建交易单；必须携带 Idempotency-Key */
   create: (body: CreateTradeRequest) => http.post<TradeView>('/trades', { body, idempotent: true }),

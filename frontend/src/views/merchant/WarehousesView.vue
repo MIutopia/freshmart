@@ -3,19 +3,10 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { catalogApi } from '../../api/catalog'
+import { merchantApi, type MerchantWarehouse } from '../../api/merchant'
 import { errorMessage } from '../../api/http'
 
-interface WarehouseRow {
-  id: number
-  merchantId: number
-  deliveryZoneId: number
-  name: string
-  code: string
-  address: string
-  status: string
-}
-
-const warehouses = ref<WarehouseRow[]>([])
+const warehouses = ref<MerchantWarehouse[]>([])
 const loading = ref(false)
 const creating = ref(false)
 const savingRule = ref(false)
@@ -26,7 +17,7 @@ const ruleForm = ref({ warehouseId: '', categoryId: '', priority: '0' })
 async function load() {
   loading.value = true
   try {
-    warehouses.value = (await catalogApi.listWarehouses()) as unknown as WarehouseRow[]
+    warehouses.value = await merchantApi.warehouses()
   } catch (error) {
     ElMessage.error(errorMessage(error))
   } finally {

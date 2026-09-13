@@ -1,6 +1,7 @@
 import { http } from './http'
 import type { MerchantApplication, MerchantSettlement } from './merchant'
 import type { ReconciliationDifferenceView } from './trade'
+import type { DeliveryTask } from './delivery'
 import type { RefundSuggestionView, RefundView } from './afterSale'
 
 /** 对应后端 PlatformRuleService.RuleView */
@@ -11,6 +12,14 @@ export interface PlatformRule {
   description: string
   updatedBy: number | null
   updatedAt: string
+}
+
+/** 对应后端 CatalogService.CategoryView */
+export interface CategoryView {
+  id: number
+  parentId: number | null
+  name: string
+  sortOrder: number
 }
 
 /** 对应后端 DeliveryService.DeliveryZoneView */
@@ -66,10 +75,14 @@ export const adminApi = {
   reviewMerchant: (merchantId: number, body: { approved: boolean; reviewNote?: string }) =>
     http.put<MerchantApplication>(`/admin/merchants/${merchantId}/review`, { body }),
 
-  // 商品分类与配送区域
+  // 商品分类
+  listCategories: () => http.get<CategoryView[]>('/admin/categories'),
   createCategory: (body: { parentId?: number; name: string; sortOrder: number }) =>
     http.post<{ id: number }>('/admin/categories', { body }),
+
+  // 配送区域与派单
   deliveryZones: () => http.get<DeliveryZoneView[]>('/admin/delivery-zones'),
+  deliveryTasks: (status?: string) => http.get<DeliveryTask[]>('/admin/delivery-tasks', { query: { status } }),
   createDeliveryZone: (body: { name: string; areaCode: string; boundaryJson?: string }) =>
     http.post<{ id: number }>('/admin/delivery-zones', { body }),
   updateDeliveryZone: (zoneId: number, body: { name: string; boundaryJson?: string; status?: string }) =>

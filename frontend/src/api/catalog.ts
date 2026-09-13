@@ -46,8 +46,5 @@ export const catalogApi = {
     batchNo: string
     availableGrams: number
     expiresOn?: string
-  }) => http.post<{ id: number }>('/merchant/catalog/batches', { body }),
-
-  adjustStock: (productId: number, body: { availableGrams: number; reason: string }) =>
-    http.put<void>(`/merchant/skus/${productId}/stock`, { body })
-}
+  }  ) => http.post<{ id: number }>('/merchant/catalog/batches', { body })
+  }

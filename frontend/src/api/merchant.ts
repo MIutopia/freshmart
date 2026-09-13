@@ -32,6 +32,17 @@ export interface MerchantSettlement {
   createdAt: string
 }
 
+/** 对应后端 CatalogService.WarehouseView */
+export interface MerchantWarehouse {
+  id: number
+  merchantId: number
+  deliveryZoneId: number
+  name: string
+  code: string
+  address: string
+  status: string
+}
+
 /** 对应后端 MerchantApplicationService.ApplicationView */
 export interface MerchantApplication {
   applicationId: number | null
@@ -48,7 +59,7 @@ export const merchantApi = {
 
   settlements: () => http.get<MerchantSettlement[]>('/merchant/settlements'),
 
-  warehouses: () => http.get<Record<string, unknown>[]>('/merchant/warehouses'),
+  warehouses: () => http.get<MerchantWarehouse[]>('/merchant/warehouses'),
 
   /** 入驻申请由消费者提交（后端要求 CONSUMER 角色） */
   submitApplication: (body: { merchantName: string; businessLicenseUrl?: string }) =>

@@ -69,6 +69,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'commissions', name: 'admin-commissions', component: () => import('../views/admin/CommissionsView.vue') },
       { path: 'merchants', name: 'admin-merchants', component: () => import('../views/admin/MerchantsView.vue') },
       { path: 'delivery-zones', name: 'admin-delivery-zones', component: () => import('../views/admin/DeliveryZonesView.vue') },
+      { path: 'dispatch', name: 'admin-dispatch', component: () => import('../views/admin/DispatchView.vue') },
       { path: 'categories', name: 'admin-categories', component: () => import('../views/admin/CategoriesView.vue') },
       { path: 'platform-rules', name: 'admin-platform-rules', component: () => import('../views/admin/PlatformRulesView.vue') },
       { path: 'marketing', name: 'admin-marketing', component: () => import('../views/admin/MarketingView.vue') },

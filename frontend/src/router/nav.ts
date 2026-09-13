@@ -85,6 +85,7 @@ export const CONSOLE_NAV: Record<ConsoleKey, NavGroup[]> = {
       items: [
         { path: '/admin/merchants', label: '商家审核' },
         { path: '/admin/delivery-zones', label: '配送区域' },
+        { path: '/admin/dispatch', label: '配送派单' },
         { path: '/admin/categories', label: '商品分类' }
       ]
     },

@@ -15,6 +15,8 @@ export interface DeliveryTask {
   deliveredAt: string | null
   proofUrl: string | null
   exceptionNote: string | null
+  /** 被指派的骑手用户 ID，未派单时为 null */
+  riderUserId: number | null
 }
 
 /** 对应后端 DeliveryService.RiderPerformanceView */
