@@ -102,11 +102,17 @@ Write-Host ("riderUserId = " + $riderUserId) -ForegroundColor DarkGray
 
 Write-Host '===== 1. platform config (admin) =====' -ForegroundColor Cyan
 $stamp = Get-Date -Format 'HHmmss'
-$category = Invoke-Step 'create category' { ApiSend 'POST' '/api/admin/categories' $adminToken @{ name = "E2E-Category-$stamp"; sortOrder = 1 } }
-$categoryRenamed = Invoke-Step 'update category' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'ACTIVE' } }
+$category = Invoke-Step 'create category' { ApiSend 'POST' '/api/admin/categories' $adminToken @{ name = "E2E-Category-$stamp"; sortOrder = 1; productScope = 'FRUIT' } }
+$categoryRenamed = Invoke-Step 'update category' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; productScope = 'FRUIT'; status = 'ACTIVE' } }
 Report 'category rename persisted' ($categoryRenamed.name -eq "E2E-Category-$stamp-v2") 'name not updated'
-Invoke-Step 'deactivate category without products' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'INACTIVE' } } | Out-Null
-Invoke-Step 'reactivate category' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; status = 'ACTIVE' } } | Out-Null
+Report 'category scope persisted' ($categoryRenamed.productScope -eq 'FRUIT') 'product scope not persisted'
+$categoryVegetable = Invoke-Step 'update category scope' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; productScope = 'VEGETABLE'; status = 'ACTIVE' } }
+Report 'category scope updated' ($categoryVegetable.productScope -eq 'VEGETABLE') 'product scope not updated'
+Invoke-ExpectFailure 'invalid product scope is rejected' {
+    ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; productScope = 'MEAT'; status = 'ACTIVE' }
+}
+Invoke-Step 'deactivate category without products' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; productScope = 'VEGETABLE'; status = 'INACTIVE' } } | Out-Null
+Invoke-Step 'reactivate category' { ApiSend 'PUT' ("/api/admin/categories/" + $category.id) $adminToken @{ name = "E2E-Category-$stamp-v2"; sortOrder = 3; productScope = 'VEGETABLE'; status = 'ACTIVE' } } | Out-Null
 $zone = Invoke-Step 'create delivery zone' { ApiSend 'POST' '/api/admin/delivery-zones' $adminToken @{ name = "E2E-Zone-$stamp"; areaCode = "E2E-$stamp" } }
 $categories = Invoke-Step 'list categories' { ApiGet '/api/admin/categories' $adminToken }
 $zones = Invoke-Step 'list delivery zones' { ApiGet '/api/admin/delivery-zones' $adminToken }
@@ -125,6 +131,29 @@ $batch = Invoke-Step 'create batch' { ApiSend 'POST' '/api/merchant/catalog/batc
 $merchantProducts = Invoke-Step 'list merchant products' { ApiGet '/api/merchant/catalog/products' $merchantToken }
 $merchantDashboard = Invoke-Step 'merchant dashboard' { ApiGet ("/api/merchant/dashboard?from=" + (Today -30) + "&to=" + (Today 0)) $merchantToken }
 Write-Host ("warehouseId=" + $warehouse.id + " productId=" + $product.id + " batchId=" + $batch.id) -ForegroundColor DarkGray
+
+# 称收入库：按实际称重克数累加到既有批次，毛重/皮重仅留痕
+$receiptFirst = Invoke-Step 'weighing stock receipt' {
+    ApiSend 'POST' '/api/merchant/inventory/receipts' $merchantToken @{
+        productId = $product.id; warehouseId = $warehouse.id; batchNo = "E2E-B-$stamp"
+        receivedGrams = 1500; grossGrams = 1600; tareGrams = 100; note = 'E2E weighing receipt'
+    }
+}
+$receiptSecond = Invoke-Step 'weighing stock receipt accumulates' {
+    ApiSend 'POST' '/api/merchant/inventory/receipts' $merchantToken @{
+        productId = $product.id; warehouseId = $warehouse.id; batchNo = "E2E-B-$stamp"
+        receivedGrams = 500; note = 'E2E weighing receipt 2'
+    }
+}
+if ($receiptFirst -and $receiptSecond) {
+    Report 'receipt accumulates batch grams' (($receiptSecond.batchAvailableGrams - $receiptFirst.batchAvailableGrams) -eq 500) 'batch grams did not accumulate by received grams'
+}
+Invoke-ExpectFailure 'receipt rejects gross lighter than net' {
+    ApiSend 'POST' '/api/merchant/inventory/receipts' $merchantToken @{
+        productId = $product.id; warehouseId = $warehouse.id; batchNo = "E2E-B-$stamp"
+        receivedGrams = 500; grossGrams = 400; note = 'invalid gross'
+    }
+}
 
 Write-Host '===== 3. consumer checkout =====' -ForegroundColor Cyan
 $evidenceUrl = $null
@@ -181,6 +210,22 @@ if ($target) {
     Invoke-Step 'rider pick' { ApiSend 'PUT' ("/api/delivery/tasks/" + $target.id + "/pick") $riderToken $null } | Out-Null
     Invoke-Step 'rider deliver' { ApiSend 'PUT' ("/api/delivery/tasks/" + $target.id + "/deliver") $riderToken @{ proofUrl = $evidenceUrl } } | Out-Null
     Invoke-Step 'rider performance' { ApiGet ("/api/delivery/performance?from=" + (Today -30) + "&to=" + (Today 0)) $riderToken } | Out-Null
+}
+
+Write-Host '===== 4.5 weighing adjustment =====' -ForegroundColor Cyan
+# 预估 1000 克、实际 1100 克：金额差额由平台承担，克数差额必须补扣回批次
+if ($newOrder) {
+    $weighed = Invoke-Step 'weighing adjustment with grams' {
+        ApiSend 'POST' '/api/weighing-adjustments' $merchantToken @{
+            orderId = $newOrder.id
+            actualGoodsAmount = 10.00
+            actualGrams = 1100
+            note = 'E2E weighing adjustment'
+        }
+    }
+    if ($weighed) {
+        Report 'weighing returns gram difference' ($weighed.inventoryAdjustGrams -eq 100) ('inventory adjust grams = ' + $weighed.inventoryAdjustGrams)
+    }
 }
 
 Write-Host '===== 5. after-sale refund =====' -ForegroundColor Cyan
@@ -240,6 +285,12 @@ Invoke-Step 'holiday card task list' { ApiGet '/api/admin/notification/holiday-c
 if ($card -and $card.id) {
     Invoke-Step 'run holiday card task' { ApiSend 'POST' ("/api/admin/notification/holiday-card-tasks/" + $card.id + "/run") $adminToken $null } | Out-Null
 }
+
+# 用户侧预览只渲染样式，不产生站内消息、不写投递记录
+$cardPreview = Invoke-Step 'holiday card preview' { ApiGet '/api/holiday-cards/preview?holidayKey=E2E&greeting=hello' $consumerToken }
+Report 'preview returns svg' ($cardPreview.svg -like '<svg*') 'preview did not return an svg'
+$defaultPreview = Invoke-Step 'holiday card preview with defaults' { ApiGet '/api/holiday-cards/preview' $consumerToken }
+Report 'preview applies defaults' ([bool]$defaultPreview.holidayKey -and [bool]$defaultPreview.svg) 'default preview missing holiday key'
 
 Write-Host '===== 8. AI assistant and logout =====' -ForegroundColor Cyan
 Invoke-Step 'ai assistant' { ApiSend 'POST' '/api/ai/assistant/messages' $consumerToken @{ message = 'recommend a vegetable for salad' } } | Out-Null

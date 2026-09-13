@@ -9,8 +9,10 @@ import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,6 +32,13 @@ public class HolidayCardController {
         String forwardedFor = servletRequest.getHeader("X-Forwarded-For");
         String sourceIp = forwardedFor == null ? servletRequest.getRemoteAddr() : forwardedFor.split(",")[0].trim();
         return service.send(admin.userId(), request.userId(), request.holidayKey(), request.greeting(), sourceIp);
+    }
+
+    @GetMapping("/api/holiday-cards/preview")
+    @PreAuthorize("isAuthenticated()")
+    public HolidayCardService.PreviewView preview(@RequestParam(required = false) String holidayKey,
+            @RequestParam(required = false) String greeting) {
+        return service.preview(holidayKey, greeting);
     }
 
     public record Request(@Positive long userId, @NotBlank @Size(max = 32) String holidayKey,

@@ -85,3 +85,17 @@ export const notificationPreferenceApi = {
   get: () => http.get<{ seasonalCardEnabled: boolean }>('/notification-preferences'),
   update: (body: { seasonalCardEnabled: boolean }) => http.put<void>('/notification-preferences', { body })
 }
+
+/** 对应后端 HolidayCardService.PreviewView */
+export interface HolidayCardPreview {
+  holidayKey: string
+  greeting: string
+  /** 已由后端转义，可安全内联渲染 */
+  svg: string
+}
+
+export const holidayCardApi = {
+  /** 用户侧预览：只渲染卡片外观，不产生站内消息、不写投递记录 */
+  preview: (holidayKey?: string, greeting?: string) =>
+    http.get<HolidayCardPreview>('/holiday-cards/preview', { query: { holidayKey, greeting } })
+}

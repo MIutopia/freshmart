@@ -33,9 +33,12 @@ public class WeighingAdjustmentController {
             @Valid @RequestBody Request request, HttpServletRequest servletRequest) {
         String forwardedFor = servletRequest.getHeader("X-Forwarded-For");
         String sourceIp = forwardedFor == null ? servletRequest.getRemoteAddr() : forwardedFor.split(",")[0].trim();
-        return service.submit(operator, request.orderId(), request.actualGoodsAmount(), request.note(), idempotencyKey, sourceIp);
+        return service.submit(operator, request.orderId(), request.actualGoodsAmount(), request.actualGrams(),
+                request.note(), idempotencyKey, sourceIp);
     }
 
-    public record Request(@Positive long orderId, @NotNull BigDecimal actualGoodsAmount, @Size(max = 500) String note) {
+    /** actualGrams 为实际称重克数，缺省时只结算金额、不动批次库存 */
+    public record Request(@Positive long orderId, @NotNull BigDecimal actualGoodsAmount,
+            @Positive Integer actualGrams, @Size(max = 500) String note) {
     }
 }

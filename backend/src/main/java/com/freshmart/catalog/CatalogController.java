@@ -15,6 +15,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -34,7 +35,8 @@ public class CatalogController {
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('ADMIN')")
     public IdResponse createCategory(@Valid @RequestBody CategoryRequest request) {
-        return new IdResponse(catalogService.createCategory(request.parentId(), request.name(), request.sortOrder()));
+        return new IdResponse(catalogService.createCategory(request.parentId(), request.name(), request.sortOrder(),
+                scopeOrDefault(request.productScope())));
     }
 
     @PostMapping("/api/merchant/catalog/warehouses")
@@ -81,6 +83,17 @@ public class CatalogController {
                 request.availableGrams(), request.expiresOn()));
     }
 
+    @PostMapping("/api/merchant/inventory/receipts")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('MERCHANT')")
+    public CatalogService.ReceiptView receiveStock(@AuthenticationPrincipal CurrentUser user,
+            @RequestHeader("Idempotency-Key") @NotBlank String idempotencyKey,
+            @Valid @RequestBody ReceiptRequest request) {
+        return catalogService.receiveStock(user, request.productId(), request.warehouseId(), request.batchNo(),
+                request.receivedGrams(), request.grossGrams(), request.tareGrams(), request.note(),
+                request.expiresOn(), idempotencyKey);
+    }
+
     @GetMapping("/api/admin/categories")
     @PreAuthorize("hasRole('ADMIN')")
     public List<CatalogService.CategoryView> listCategories() {
@@ -91,10 +104,17 @@ public class CatalogController {
     @PreAuthorize("hasRole('ADMIN')")
     public CatalogService.CategoryView updateCategory(@PathVariable long categoryId,
             @Valid @RequestBody UpdateCategoryRequest request) {
-        return catalogService.updateCategory(categoryId, request.name(), request.sortOrder(), request.status());
+        return catalogService.updateCategory(categoryId, request.name(), request.sortOrder(),
+                scopeOrDefault(request.productScope()), request.status());
     }
 
-    public record UpdateCategoryRequest(@NotBlank String name, int sortOrder, @NotBlank String status) {
+    public record UpdateCategoryRequest(@NotBlank String name, int sortOrder, @NotBlank String status,
+            String productScope) {
+    }
+
+    /** 未显式指定品类时按 OTHER 处理，保证既有调用方无需改动即可继续工作 */
+    private String scopeOrDefault(String productScope) {
+        return productScope == null || productScope.isBlank() ? "OTHER" : productScope;
     }
 
     @GetMapping("/api/catalog/products")
@@ -115,7 +135,8 @@ public class CatalogController {
     }
 
     public record IdResponse(long id) { }
-    public record CategoryRequest(Long parentId, @NotBlank String name, @PositiveOrZero int sortOrder) { }
+    public record CategoryRequest(Long parentId, @NotBlank String name, @PositiveOrZero int sortOrder,
+            String productScope) { }
     public record WarehouseRequest(@Positive long deliveryZoneId, @NotBlank String name, @NotBlank String code, @NotBlank String address) { }
     public record WarehouseCategoryRequest(@Positive long warehouseId, @Positive long categoryId) { }
     public record WarehouseRuleRequest(@Positive long warehouseId, @Positive long categoryId, @PositiveOrZero int priority) { }
@@ -124,4 +145,7 @@ public class CatalogController {
             @NotNull @DecimalMin(value = "0.01") BigDecimal merchantPricePerKg) { }
     public record BatchRequest(@Positive long productId, @Positive long warehouseId, @NotBlank String batchNo,
             @Positive int availableGrams, LocalDate expiresOn) { }
+    public record ReceiptRequest(@Positive long productId, @Positive long warehouseId, @NotBlank String batchNo,
+            @Positive int receivedGrams, @PositiveOrZero Integer grossGrams, @PositiveOrZero Integer tareGrams,
+            String note, LocalDate expiresOn) { }
 }

@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS freshmart_merchant.product_categories (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   parent_id BIGINT NULL,
   name VARCHAR(64) NOT NULL,
+  product_scope VARCHAR(24) NOT NULL DEFAULT 'OTHER',
   sort_order INT NOT NULL DEFAULT 0,
   status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE'
 ) ENGINE=InnoDB;
@@ -207,6 +208,25 @@ CREATE TABLE IF NOT EXISTS freshmart_merchant.inventory_batches (
   KEY idx_batch_warehouse_expiry (warehouse_id, expires_on, available_grams),
   CONSTRAINT fk_batch_product FOREIGN KEY (product_id) REFERENCES freshmart_merchant.products(id),
   CONSTRAINT fk_batch_warehouse FOREIGN KEY (warehouse_id) REFERENCES freshmart_merchant.warehouses(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_merchant.inventory_receipts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  receipt_no VARCHAR(48) NOT NULL,
+  batch_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  warehouse_id BIGINT NOT NULL,
+  received_grams INT NOT NULL,
+  gross_grams INT NULL,
+  tare_grams INT NULL,
+  note VARCHAR(300) NULL,
+  idempotency_key VARCHAR(96) NOT NULL,
+  received_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_inventory_receipt_no (receipt_no),
+  UNIQUE KEY uk_inventory_receipt_idem (idempotency_key),
+  KEY idx_receipt_batch (batch_id),
+  KEY idx_receipt_warehouse (warehouse_id, created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_merchant.promotion_rules (
@@ -396,6 +416,8 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.orders (
   discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   redeemed_points INT NOT NULL DEFAULT 0,
   points_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  actual_goods_amount DECIMAL(10,2) NULL,
+  platform_absorbed_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   payable_amount DECIMAL(10,2) NOT NULL,
   address_snapshot JSON NOT NULL,
   pricing_snapshot JSON NOT NULL,
@@ -675,6 +697,10 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.weighing_adjustments (
   merchant_id BIGINT NOT NULL,
   prepaid_goods_amount DECIMAL(10,2) NOT NULL,
   actual_goods_amount DECIMAL(10,2) NOT NULL,
+  prepaid_grams INT NULL,
+  actual_grams INT NULL,
+  inventory_adjust_grams INT NOT NULL DEFAULT 0,
+  inventory_adjusted_at DATETIME NULL,
   difference_amount DECIMAL(10,2) NOT NULL,
   action VARCHAR(24) NOT NULL,
   refund_amount DECIMAL(10,2) NOT NULL DEFAULT 0,

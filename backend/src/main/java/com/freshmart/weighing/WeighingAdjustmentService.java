@@ -36,7 +36,7 @@ public class WeighingAdjustmentService {
     }
 
     @Transactional("tradeTransactionManager")
-    public AdjustmentView submit(CurrentUser operator, long orderId, BigDecimal actualGoodsAmount,
+    public AdjustmentView submit(CurrentUser operator, long orderId, BigDecimal actualGoodsAmount, Integer actualGrams,
             String note, String idempotencyKey, String sourceIp) {
         if (!operator.hasRole("ADMIN") && !operator.hasRole("MERCHANT")) {
             throw new ResponseStatusException(FORBIDDEN, "merchant or admin role is required");
@@ -69,30 +69,96 @@ public class WeighingAdjustmentService {
         try {
             tradeJdbcTemplate.update("""
                     INSERT INTO weighing_adjustments (order_id, merchant_id, prepaid_goods_amount, actual_goods_amount,
-                        difference_amount, action, refund_amount, absorbed_amount, note, idempotency_key, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, order.id(), order.merchantId(), order.goodsAmount(), actualGoodsAmount,
+                        actual_grams, difference_amount, action, refund_amount, absorbed_amount, note, idempotency_key, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, order.id(), order.merchantId(), order.goodsAmount(), actualGoodsAmount, actualGrams,
                     actualGoodsAmount.subtract(order.goodsAmount()), settlement.action().name(), settlement.refundAmount(),
                     settlement.absorbedAmount(), note == null ? null : note.trim(), idempotencyKey, operator.userId());
         } catch (org.springframework.dao.DuplicateKeyException exception) {
             throw new ResponseStatusException(CONFLICT, "an adjustment already exists for this order");
         }
+        // 克数回补放在插入成功之后：唯一键冲突会直接抛出并回滚，不会出现库存已改而调整未落库的情况
+        int inventoryAdjustGrams = actualGrams == null ? 0 : adjustBatchGrams(order.id(), actualGrams, idempotencyKey);
         settle(order, settlement, adjustmentId);
         auditLogService.record(operator.userId(), "WEIGHING_ADJUSTMENT_SUBMITTED", "ORDER", Long.toString(order.id()), sourceIp);
         return new AdjustmentView(adjustmentId, order.id(), order.merchantId(), order.goodsAmount(), actualGoodsAmount,
-                settlement.action().name(), settlement.refundAmount(), settlement.absorbedAmount(), LocalDateTime.now());
+                actualGrams, inventoryAdjustGrams, settlement.action().name(), settlement.refundAmount(),
+                settlement.absorbedAmount(), LocalDateTime.now());
     }
 
     private AdjustmentView findByIdempotencyKey(String key) {
         return tradeJdbcTemplate.query("""
-                SELECT id, order_id, merchant_id, prepaid_goods_amount, actual_goods_amount, action,
-                       refund_amount, absorbed_amount, created_at
+                SELECT id, order_id, merchant_id, prepaid_goods_amount, actual_goods_amount, actual_grams,
+                       inventory_adjust_grams, action, refund_amount, absorbed_amount, created_at
                 FROM weighing_adjustments WHERE idempotency_key = ?
                 """, (rs, row) -> new AdjustmentView("WEIGH-" + rs.getLong("order_id") + "-" + key,
                 rs.getLong("order_id"), rs.getLong("merchant_id"), rs.getBigDecimal("prepaid_goods_amount"),
-                rs.getBigDecimal("actual_goods_amount"), rs.getString("action"), rs.getBigDecimal("refund_amount"),
+                rs.getBigDecimal("actual_goods_amount"), (Integer) rs.getObject("actual_grams"),
+                rs.getInt("inventory_adjust_grams"), rs.getString("action"), rs.getBigDecimal("refund_amount"),
                 rs.getBigDecimal("absorbed_amount"), rs.getObject("created_at", LocalDateTime.class)), key)
                 .stream().findFirst().orElse(null);
+    }
+
+    /**
+     * 把实际称重与预估克数的差额回补到订单占用的批次：实际更重则补扣可用克数，更轻则退回可用克数。
+     * 按各批次预占克数比例分摊，最后一批兜底剩余，保证分摊总量与差额完全一致。
+     * 订单没有批次分配记录时不调整，保持既有非批次库存场景可用。
+     */
+    private int adjustBatchGrams(long orderId, int actualGrams, String idempotencyKey) {
+        List<BatchAllocation> allocations = tradeJdbcTemplate.query("""
+                SELECT allocation.batch_id, allocation.warehouse_id, SUM(allocation.allocated_grams) grams
+                FROM order_item_batch_allocations allocation
+                JOIN order_items item ON item.id = allocation.order_item_id
+                WHERE item.order_id = ?
+                GROUP BY allocation.batch_id, allocation.warehouse_id
+                ORDER BY allocation.batch_id
+                """, (rs, row) -> new BatchAllocation(rs.getLong("batch_id"), rs.getLong("warehouse_id"),
+                rs.getInt("grams")), orderId);
+        if (allocations.isEmpty()) {
+            return 0;
+        }
+        long prepaidGrams = allocations.stream().mapToLong(BatchAllocation::grams).sum();
+        tradeJdbcTemplate.update("UPDATE weighing_adjustments SET prepaid_grams = ? WHERE idempotency_key = ?",
+                (int) prepaidGrams, idempotencyKey);
+        long difference = actualGrams - prepaidGrams;
+        if (difference == 0) {
+            return 0;
+        }
+        long remaining = Math.abs(difference);
+        for (int index = 0; index < allocations.size(); index++) {
+            BatchAllocation allocation = allocations.get(index);
+            long share = index == allocations.size() - 1
+                    ? remaining
+                    : Math.round((double) allocation.grams() / prepaidGrams * Math.abs(difference));
+            share = Math.min(share, remaining);
+            if (share <= 0) {
+                continue;
+            }
+            int updated;
+            if (difference > 0) {
+                updated = tradeJdbcTemplate.update("""
+                        UPDATE freshmart_merchant.inventory_batches SET available_grams = available_grams - ?
+                        WHERE id = ? AND warehouse_id = ? AND available_grams >= ?
+                        """, share, allocation.batchId(), allocation.warehouseId(), share);
+                if (updated == 0) {
+                    throw new ResponseStatusException(CONFLICT, "inventory is insufficient for the heavier weighing result");
+                }
+            } else {
+                updated = tradeJdbcTemplate.update("""
+                        UPDATE freshmart_merchant.inventory_batches SET available_grams = available_grams + ?
+                        WHERE id = ? AND warehouse_id = ?
+                        """, share, allocation.batchId(), allocation.warehouseId());
+                if (updated == 0) {
+                    throw new ResponseStatusException(CONFLICT, "inventory batch no longer exists");
+                }
+            }
+            remaining -= share;
+        }
+        tradeJdbcTemplate.update("""
+                UPDATE weighing_adjustments SET inventory_adjust_grams = ?, inventory_adjusted_at = CURRENT_TIMESTAMP
+                WHERE idempotency_key = ?
+                """, (int) difference, idempotencyKey);
+        return (int) difference;
     }
 
     private void settle(OrderSnapshot order, WeighingSettlementPolicy.Settlement settlement, String adjustmentId) {
@@ -131,8 +197,11 @@ public class WeighingAdjustmentService {
     private record OrderSnapshot(long id, long merchantId, long userId, long tradeId, BigDecimal goodsAmount, String status) {
     }
 
+    private record BatchAllocation(long batchId, long warehouseId, int grams) {
+    }
+
     public record AdjustmentView(String adjustmentId, long orderId, long merchantId, BigDecimal prepaidGoodsAmount,
-            BigDecimal actualGoodsAmount, String action, BigDecimal refundAmount, BigDecimal absorbedAmount,
-            LocalDateTime createdAt) {
+            BigDecimal actualGoodsAmount, Integer actualGrams, int inventoryAdjustGrams, String action,
+            BigDecimal refundAmount, BigDecimal absorbedAmount, LocalDateTime createdAt) {
     }
 }

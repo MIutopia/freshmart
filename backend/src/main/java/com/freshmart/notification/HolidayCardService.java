@@ -13,6 +13,19 @@ public class HolidayCardService {
         this.auditLogService = auditLogService;
     }
 
+    /**
+     * 用户侧预览：只渲染卡片外观，不产生站内消息、不落投递记录，因此不写审计。
+     * 未传 holidayKey / greeting 时给出一份可直接展示的默认样例。
+     */
+    public PreviewView preview(String holidayKey, String greeting) {
+        String safeHoliday = HolidayCardContentPolicy.sanitize(
+                holidayKey == null || holidayKey.isBlank() ? "节气" : holidayKey, 32);
+        String safeGreeting = HolidayCardContentPolicy.sanitize(
+                greeting == null || greeting.isBlank() ? "节气将至，愿新鲜常伴" : greeting, 120);
+        return new PreviewView(safeHoliday, safeGreeting,
+                HolidayCardContentPolicy.render(safeHoliday, safeGreeting));
+    }
+
     public InboxService.MessageView send(long operatorId, long userId, String holidayKey, String greeting,
             String sourceIp) {
         String safeHoliday = HolidayCardContentPolicy.sanitize(holidayKey, 32);
@@ -34,5 +47,9 @@ public class HolidayCardService {
                 "HOLIDAY-CARD-" + taskKey + "-" + userId);
         auditLogService.record(operatorId, "HOLIDAY_CARD_SENT", "HOLIDAY_CARD_TASK", Long.toString(taskId), "SYSTEM");
         return message;
+    }
+
+    /** svg 为可直接内联展示的卡片内容，已按 HolidayCardContentPolicy 做过转义 */
+    public record PreviewView(String holidayKey, String greeting, String svg) {
     }
 }

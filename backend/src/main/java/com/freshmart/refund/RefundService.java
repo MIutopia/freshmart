@@ -88,7 +88,7 @@ public class RefundService {
                 SELECT delivered_at FROM delivery_tasks WHERE order_id = ? AND status = 'DELIVERED'
                 """, (rs, row) -> rs.getObject(1, LocalDateTime.class), orderId).stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(CONFLICT, "order has not been delivered"));
-        int configuredWindowMinutes = platformRuleService.integerOrDefault("refund.default.window.minutes", windowMinutes);
+        int configuredWindowMinutes = refundWindowMinutes(orderId);
         if (deliveredAt.plusMinutes(configuredWindowMinutes).isBefore(LocalDateTime.now())) {
             throw new ResponseStatusException(CONFLICT, "refund window has expired");
         }
@@ -102,6 +102,30 @@ public class RefundService {
         long id = tradeJdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         statusLogService.record("REFUND", refundNo, null, "PENDING", "REFUND_APPLIED", user.userId(), "用户提交售后申请", "BUSINESS");
         return new RefundView(id, refundNo, order.id(), issueType, order.amount(), "PENDING", deliveredAt);
+    }
+
+    /**
+     * 售后窗口按订单商品所属分类的品类取平台规则：水果与蔬菜的保鲜期差异很大，取其中最长的一条，
+     * 避免混合订单被较短的窗口提前卡住；全部为 OTHER 或查不到分类时回落到全局默认窗口。
+     */
+    private int refundWindowMinutes(long orderId) {
+        int defaultWindow = platformRuleService.integerOrDefault("refund.default.window.minutes", windowMinutes);
+        List<String> scopes = tradeJdbcTemplate.query("""
+                SELECT DISTINCT category.product_scope
+                FROM order_items item
+                JOIN freshmart_merchant.products product ON product.id = item.product_id
+                JOIN freshmart_merchant.product_categories category ON category.id = product.category_id
+                WHERE item.order_id = ?
+                """, (rs, row) -> rs.getString(1), orderId);
+        int resolved = 0;
+        for (String scope : scopes) {
+            resolved = Math.max(resolved, switch (scope == null ? "OTHER" : scope) {
+                case "FRUIT" -> platformRuleService.integerOrDefault("refund.fruit.window.minutes", defaultWindow);
+                case "VEGETABLE" -> platformRuleService.integerOrDefault("refund.vegetable.window.minutes", defaultWindow);
+                default -> defaultWindow;
+            });
+        }
+        return resolved > 0 ? resolved : defaultWindow;
     }
 
     @Transactional("tradeTransactionManager")

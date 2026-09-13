@@ -5,15 +5,21 @@ import { Refresh } from '@element-plus/icons-vue'
 import { adminApi, type CategoryView } from '../../api/admin'
 import { errorMessage } from '../../api/http'
 
+const SCOPE_OPTIONS = [
+  { value: 'FRUIT', label: '水果 FRUIT' },
+  { value: 'VEGETABLE', label: '蔬菜 VEGETABLE' },
+  { value: 'OTHER', label: '其他 OTHER' }
+]
+
 const categories = ref<CategoryView[]>([])
 const loading = ref(false)
 const creating = ref(false)
 const saving = ref(false)
 
-const form = ref({ parentId: '', name: '', sortOrder: '0' })
+const form = ref({ parentId: '', name: '', sortOrder: '0', productScope: 'OTHER' })
 
 const editVisible = ref(false)
-const editForm = ref({ id: 0, name: '', sortOrder: '0', status: 'ACTIVE' })
+const editForm = ref({ id: 0, name: '', sortOrder: '0', productScope: 'OTHER', status: 'ACTIVE' })
 
 async function load() {
   loading.value = true
@@ -36,10 +42,11 @@ async function createCategory() {
     await adminApi.createCategory({
       parentId: form.value.parentId ? Number(form.value.parentId) : undefined,
       name: form.value.name.trim(),
-      sortOrder: Number(form.value.sortOrder || 0)
+      sortOrder: Number(form.value.sortOrder || 0),
+      productScope: form.value.productScope
     })
     ElMessage.success('分类已创建')
-    form.value = { parentId: '', name: '', sortOrder: '0' }
+    form.value = { parentId: '', name: '', sortOrder: '0', productScope: 'OTHER' }
     await load()
   } catch (error) {
     ElMessage.error(errorMessage(error))
@@ -53,6 +60,7 @@ function openEdit(row: CategoryView) {
     id: row.id,
     name: row.name,
     sortOrder: String(row.sortOrder),
+    productScope: row.productScope,
     status: row.status
   }
   editVisible.value = true
@@ -68,6 +76,7 @@ async function saveEdit() {
     await adminApi.updateCategory(editForm.value.id, {
       name: editForm.value.name.trim(),
       sortOrder: Number(editForm.value.sortOrder || 0),
+      productScope: editForm.value.productScope,
       status: editForm.value.status
     })
     ElMessage.success('分类已更新')
@@ -80,13 +89,17 @@ async function saveEdit() {
   }
 }
 
-/** 停用走同一更新接口；分类下仍有在架商品时后端拒绝并返回冲突 */
+/**
+ * 停用走同一更新接口；分类下仍有在架商品时后端拒绝并返回冲突。
+ * 必须回传 productScope，否则整体覆盖会把品类重置成 OTHER。
+ */
 async function toggleStatus(row: CategoryView) {
   const next = row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
   try {
     await adminApi.updateCategory(row.id, {
       name: row.name,
       sortOrder: row.sortOrder,
+      productScope: row.productScope,
       status: next
     })
     ElMessage.success(next === 'ACTIVE' ? '分类已启用' : '分类已停用')
@@ -104,7 +117,7 @@ onMounted(load)
     <header class="page-head">
       <h2>商品分类</h2>
       <span class="sub">
-        分类是商品上架与仓库经营范围的基础；停用前需先下架该分类下的全部商品
+        分类是商品上架与仓库经营范围的基础；品类决定售后申请窗口，停用前需先下架该分类下的全部商品
       </span>
     </header>
 
@@ -117,6 +130,11 @@ onMounted(load)
           </el-form-item>
           <el-form-item label="分类名称" required>
             <el-input v-model="form.name" placeholder="如 叶菜类" />
+          </el-form-item>
+          <el-form-item label="商品品类">
+            <el-select v-model="form.productScope">
+              <el-option v-for="item in SCOPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
           </el-form-item>
           <el-form-item label="排序">
             <el-input v-model="form.sortOrder" placeholder="0" />
@@ -138,6 +156,11 @@ onMounted(load)
         <el-table v-loading="loading" :data="categories" size="small">
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column prop="name" label="名称" min-width="130" />
+          <el-table-column label="品类" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">{{ row.productScope }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="父分类" width="90">
             <template #default="{ row }">{{ row.parentId ?? '一级' }}</template>
           </el-table-column>
@@ -171,6 +194,11 @@ onMounted(load)
       <el-form label-position="top">
         <el-form-item label="分类名称" required>
           <el-input v-model="editForm.name" />
+        </el-form-item>
+        <el-form-item label="商品品类">
+          <el-select v-model="editForm.productScope">
+            <el-option v-for="item in SCOPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="排序">
           <el-input v-model="editForm.sortOrder" />

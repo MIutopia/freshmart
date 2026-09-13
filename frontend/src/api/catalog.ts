@@ -46,5 +46,32 @@ export const catalogApi = {
     batchNo: string
     availableGrams: number
     expiresOn?: string
-  }  ) => http.post<{ id: number }>('/merchant/catalog/batches', { body })
+  }  ) => http.post<{ id: number }>('/merchant/catalog/batches', { body }),
+
+  /**
+   * 称收入库：净重 receivedGrams 才是库存增量，毛重与皮重仅用于留痕。
+   * 同一商品 + 仓库 + 批次号会累加到既有批次，不会重复建号。
+   */
+  receiveStock: (body: {
+    productId: number
+    warehouseId: number
+    batchNo: string
+    receivedGrams: number
+    grossGrams?: number
+    tareGrams?: number
+    note?: string
+    expiresOn?: string
+  }) =>
+    http.post<{
+      receiptNo: string
+      batchId: number
+      productId: number
+      warehouseId: number
+      receivedGrams: number
+      grossGrams: number | null
+      tareGrams: number | null
+      note: string | null
+      batchAvailableGrams: number
+      createdAt: string
+    }>('/merchant/inventory/receipts', { body, idempotent: true })
   }

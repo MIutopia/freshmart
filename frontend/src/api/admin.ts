@@ -20,6 +20,8 @@ export interface CategoryView {
   parentId: number | null
   name: string
   sortOrder: number
+  /** FRUIT / VEGETABLE / OTHER，决定该分类下商品适用哪条售后窗口规则 */
+  productScope: string
   status: string
 }
 
@@ -78,11 +80,16 @@ export const adminApi = {
 
   // 商品分类
   listCategories: () => http.get<CategoryView[]>('/admin/categories'),
-  createCategory: (body: { parentId?: number; name: string; sortOrder: number }) =>
+  createCategory: (body: { parentId?: number; name: string; sortOrder: number; productScope?: string }) =>
     http.post<{ id: number }>('/admin/categories', { body }),
-  /** 停用前必须没有在架商品引用该分类，否则后端返回 409 */
-  updateCategory: (categoryId: number, body: { name: string; sortOrder: number; status: string }) =>
-    http.put<CategoryView>(`/admin/categories/${categoryId}`, { body }),
+  /**
+   * 停用前必须没有在架商品引用该分类，否则后端返回 409。
+   * 注意 productScope 是整体覆盖：漏传会被后端按 OTHER 处理，因此更新时应原样回传当前值。
+   */
+  updateCategory: (
+    categoryId: number,
+    body: { name: string; sortOrder: number; status: string; productScope?: string }
+  ) => http.put<CategoryView>(`/admin/categories/${categoryId}`, { body }),
 
   // 配送区域与派单
   deliveryZones: () => http.get<DeliveryZoneView[]>('/admin/delivery-zones'),
