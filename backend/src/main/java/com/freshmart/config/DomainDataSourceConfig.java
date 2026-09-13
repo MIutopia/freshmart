@@ -137,4 +137,9 @@ public class DomainDataSourceConfig {
     JdbcTemplate logJdbcTemplate(@Qualifier("logDataSource") DataSource dataSource) {
         return new JdbcTemplate(dataSource);
     }
+
+    @Bean("logTransactionManager")
+    PlatformTransactionManager logTransactionManager(@Qualifier("logDataSource") DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
 }

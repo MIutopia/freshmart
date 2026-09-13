@@ -6,6 +6,7 @@ import com.freshmart.auth.CurrentUser;
 import com.freshmart.order.FreightCalculator;
 import com.freshmart.order.MarketPriceSettlementPolicy;
 import com.freshmart.marketing.BatchPromotionPolicy;
+import com.freshmart.marketing.FlashSalePolicy;
 import com.freshmart.marketing.PromotionCalculator;
 import com.freshmart.platform.PlatformRuleService;
 import java.math.BigDecimal;
@@ -107,8 +108,11 @@ public class TradeService {
             } catch (IllegalArgumentException exception) {
                 throw new ResponseStatusException(BAD_REQUEST, exception.getMessage());
             }
+            FlashSale flashSale = activeFlashSale(requestedLine.productId());
+            BigDecimal flashDiscount = flashSale == null ? BigDecimal.ZERO
+                    : FlashSalePolicy.discountAmount(requestedLine.weightGrams(), price.userGoodsAmount(), flashSale.salePricePerKg());
             merchantLines.computeIfAbsent(product.merchantId(), ignored -> new ArrayList<>())
-                    .add(new PricedLine(product, requestedLine.weightGrams(), price));
+                    .add(new PricedLine(product, requestedLine.weightGrams(), price, flashSale, flashDiscount));
         }
 
         Map<Long, BigDecimal> batchDiscounts = new HashMap<>();
@@ -127,6 +131,7 @@ public class TradeService {
                 """, tradeNo, user.userId(), goodsAmount, BigDecimal.ZERO, BigDecimal.ZERO,
                 goodsAmount, expiresAt, idempotencyKey);
         long tradeId = lastInsertId();
+        reserveFlashSales(tradeId, user.userId(), merchantLines, expiresAt);
         String addressJson = json(addressSnapshot);
         List<String> orderNos = new ArrayList<>();
         for (Map.Entry<Long, List<PricedLine>> entry : merchantLines.entrySet()) {
@@ -150,11 +155,13 @@ public class TradeService {
                 jdbcTemplate.update("""
                         INSERT INTO order_items (order_id, product_id, product_name_snapshot, warehouse_id, weight_grams,
                                                  market_price_per_kg, merchant_price_per_kg, user_price_per_kg,
-                                                 merchant_gross_amount, user_goods_amount, platform_price_subsidy_amount)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                 merchant_gross_amount, user_goods_amount, platform_price_subsidy_amount,
+                                                 flash_sale_id, flash_sale_discount_amount)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, orderId, line.product().productId(), line.product().name(), warehouseId, line.weightGrams(),
                         line.product().marketPricePerKg(), line.product().merchantPricePerKg(), line.price().userPricePerKilogram(),
-                        line.price().merchantGrossAmount(), line.price().userGoodsAmount(), line.price().platformSubsidyAmount());
+                        line.price().merchantGrossAmount(), line.price().userGoodsAmount(), line.price().platformSubsidyAmount(),
+                        line.flashSale() == null ? null : line.flashSale().id(), line.flashDiscount());
                 long orderItemId = lastInsertId();
                 BigDecimal batchDiscount = reserveBatches(tradeId, orderId, orderItemId, line.product().productId(),
                         warehouseId, line.weightGrams(), line.price().userPricePerKilogram(), expiresAt);
@@ -171,9 +178,11 @@ public class TradeService {
         for (Map.Entry<Long, Long> entry : orderIds.entrySet()) {
             long merchantId = entry.getKey();
             BigDecimal merchantBatchDiscount = batchDiscounts.getOrDefault(merchantId, BigDecimal.ZERO);
+            BigDecimal merchantFlashDiscount = merchantLines.get(merchantId).stream().map(PricedLine::flashDiscount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal merchantGoods = merchantLines.get(merchantId).stream().map(line -> line.price().userGoodsAmount())
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal promotionBase = merchantGoods.subtract(merchantBatchDiscount).max(BigDecimal.ZERO);
+            BigDecimal promotionBase = merchantGoods.subtract(merchantBatchDiscount).subtract(merchantFlashDiscount).max(BigDecimal.ZERO);
             BigDecimal membershipRate = membershipRate(points);
             PromotionCalculator.DiscountResult discount = PromotionCalculator.calculate(promotionBase, membershipRate,
                     merchantPromotions.getOrDefault(merchantId, List.of()));
@@ -184,12 +193,13 @@ public class TradeService {
             }
             BigDecimal payableGoods = discount.payableGoodsAmount();
             BigDecimal merchantFreight = FreightCalculator.calculate(payableGoods, freeFreightThreshold, standardFreight);
-            BigDecimal merchantDiscount = merchantBatchDiscount.add(discount.discountAmount());
+            BigDecimal merchantDiscount = merchantBatchDiscount.add(merchantFlashDiscount).add(discount.discountAmount());
             finalDiscountAmount = finalDiscountAmount.add(merchantDiscount);
             finalFreightAmount = finalFreightAmount.add(merchantFreight);
             jdbcTemplate.update("UPDATE orders SET discount_amount = ?, freight_amount = ?, payable_amount = ?, pricing_snapshot = CAST(? AS JSON) WHERE id = ?",
                     merchantDiscount, merchantFreight, payableGoods.add(merchantFreight),
                     json(Map.of("priceSource", "MARKET_CAP", "batchPromotionDiscount", merchantBatchDiscount,
+                            "flashSaleDiscount", merchantFlashDiscount,
                             "marketingDiscount", discount.discountAmount())), entry.getValue());
         }
         jdbcTemplate.update("UPDATE trade_orders SET discount_amount = ?, freight_amount = ?, payable_amount = ? WHERE id = ?",
@@ -292,6 +302,14 @@ public class TradeService {
                     reservation.promotionId(), reservation.markdownRate(), reservation.grams(), reservation.discountAmount());
         }
         jdbcTemplate.update("UPDATE inventory_reservations SET status = 'CONSUMED' WHERE trade_id = ? AND status = 'ACTIVE'", trade.id());
+        jdbcTemplate.update("""
+                UPDATE freshmart_merchant.flash_sale_items sale JOIN flash_sale_reservations reservation
+                    ON reservation.flash_sale_id = sale.id
+                SET sale.reserved_grams = sale.reserved_grams - reservation.reserved_grams,
+                    sale.sold_grams = sale.sold_grams + reservation.reserved_grams
+                WHERE reservation.trade_id = ? AND reservation.status = 'ACTIVE'
+                """, trade.id());
+        jdbcTemplate.update("UPDATE flash_sale_reservations SET status = 'CONSUMED' WHERE trade_id = ? AND status = 'ACTIVE'", trade.id());
         jdbcTemplate.update("UPDATE trade_orders SET status = 'PAID' WHERE id = ?", trade.id());
         jdbcTemplate.update("UPDATE orders SET status = 'WAITING_PICKING' WHERE trade_id = ?", trade.id());
         jdbcTemplate.update("""
@@ -453,6 +471,54 @@ public class TradeService {
                 """, (rs, row) -> rs.getBigDecimal(1), points).stream().findFirst().orElse(BigDecimal.valueOf(100));
     }
 
+    private FlashSale activeFlashSale(long productId) {
+        return jdbcTemplate.query("""
+                SELECT id, sale_price_per_kg, per_user_limit_grams FROM freshmart_merchant.flash_sale_items
+                WHERE product_id = ? AND status IN ('SCHEDULED', 'ACTIVE') AND starts_at <= CURRENT_TIMESTAMP
+                  AND ends_at > CURRENT_TIMESTAMP AND total_grams > reserved_grams + sold_grams
+                ORDER BY sale_price_per_kg, id LIMIT 1
+                """, (rs, row) -> new FlashSale(rs.getLong("id"), rs.getBigDecimal("sale_price_per_kg"),
+                rs.getInt("per_user_limit_grams")), productId).stream().findFirst().orElse(null);
+    }
+
+    private void reserveFlashSales(long tradeId, long userId, Map<Long, List<PricedLine>> merchantLines,
+            LocalDateTime expiresAt) {
+        Map<Long, Integer> gramsBySale = new HashMap<>();
+        Map<Long, Integer> limits = new HashMap<>();
+        for (List<PricedLine> lines : merchantLines.values()) {
+            for (PricedLine line : lines) {
+                if (line.flashSale() != null) {
+                    gramsBySale.merge(line.flashSale().id(), line.weightGrams(), Integer::sum);
+                    limits.put(line.flashSale().id(), line.flashSale().perUserLimitGrams());
+                }
+            }
+        }
+        for (Map.Entry<Long, Integer> entry : gramsBySale.entrySet()) {
+            if (entry.getValue() > limits.get(entry.getKey())) {
+                throw new ResponseStatusException(CONFLICT, "flash sale personal limit is exceeded");
+            }
+            Integer consumed = jdbcTemplate.query("""
+                    SELECT COALESCE(SUM(reserved_grams), 0) FROM flash_sale_reservations
+                    WHERE flash_sale_id = ? AND user_id = ? AND status IN ('ACTIVE', 'CONSUMED')
+                    """, (rs, row) -> rs.getInt(1), entry.getKey(), userId).stream().findFirst().orElse(0);
+            if (consumed + entry.getValue() > limits.get(entry.getKey())) {
+                throw new ResponseStatusException(CONFLICT, "flash sale personal limit is exceeded");
+            }
+            int updated = jdbcTemplate.update("""
+                    UPDATE freshmart_merchant.flash_sale_items SET reserved_grams = reserved_grams + ?, status = 'ACTIVE'
+                    WHERE id = ? AND starts_at <= CURRENT_TIMESTAMP AND ends_at > CURRENT_TIMESTAMP
+                      AND total_grams >= reserved_grams + sold_grams + ?
+                    """, entry.getValue(), entry.getKey(), entry.getValue());
+            if (updated == 0) {
+                throw new ResponseStatusException(CONFLICT, "flash sale inventory is insufficient");
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO flash_sale_reservations (flash_sale_id, trade_id, user_id, reserved_grams, expires_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, entry.getKey(), tradeId, userId, entry.getValue(), expiresAt);
+        }
+    }
+
     private TradeView requireOwnedPendingTrade(CurrentUser user, String tradeNo) {
         TradeView trade = findByTradeNo(tradeNo);
         if (trade == null) {
@@ -516,7 +582,11 @@ public class TradeService {
             BigDecimal marketPricePerKg, BigDecimal merchantPricePerKg) {
     }
 
-    private record PricedLine(ProductWarehouse product, int weightGrams, MarketPriceSettlementPolicy.PriceBreakdown price) {
+    private record PricedLine(ProductWarehouse product, int weightGrams, MarketPriceSettlementPolicy.PriceBreakdown price,
+            FlashSale flashSale, BigDecimal flashDiscount) {
+    }
+
+    private record FlashSale(long id, BigDecimal salePricePerKg, int perUserLimitGrams) {
     }
 
     private record Batch(long id, int availableGrams, int reservedGrams, Long promotionId, BigDecimal markdownRate) {

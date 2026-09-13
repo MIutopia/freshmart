@@ -154,6 +154,14 @@ public class DeliveryService {
         if (updated == 0) {
             throw new ResponseStatusException(CONFLICT, "delivery task is not in the expected state");
         }
+        if ("PICKED".equals(targetStatus) || "DELIVERED".equals(targetStatus)) {
+            jdbcTemplate.update("UPDATE freshmart_trade.orders SET status = ? WHERE id = ?", targetStatus, taskIdToOrderId(taskId));
+        }
+    }
+
+    private long taskIdToOrderId(long taskId) {
+        return jdbcTemplate.query("SELECT order_id FROM delivery_tasks WHERE id = ?", (rs, row) -> rs.getLong(1), taskId)
+                .stream().findFirst().orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "delivery task not found"));
     }
 
     private void updatePerformance(long riderUserId, String metric, int increment) {

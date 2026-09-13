@@ -53,8 +53,25 @@ public class InventoryReservationExpiryJob {
                         """, tradeId);
             }
         }
+        List<FlashReservation> expiredFlash = jdbcTemplate.query("""
+                SELECT id, flash_sale_id, reserved_grams FROM flash_sale_reservations
+                WHERE status = 'ACTIVE' AND expires_at <= CURRENT_TIMESTAMP FOR UPDATE
+                """, (rs, row) -> new FlashReservation(rs.getLong("id"), rs.getLong("flash_sale_id"), rs.getInt("reserved_grams")));
+        for (FlashReservation reservation : expiredFlash) {
+            jdbcTemplate.update("""
+                    UPDATE freshmart_merchant.flash_sale_items SET reserved_grams = reserved_grams - ?
+                    WHERE id = ? AND reserved_grams >= ?
+                    """, reservation.grams(), reservation.flashSaleId(), reservation.grams());
+            jdbcTemplate.update("""
+                    UPDATE flash_sale_reservations SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'ACTIVE'
+                    """, reservation.id());
+        }
     }
 
     private record Reservation(long id, long tradeId, long productId, long batchId, int grams) {
+    }
+
+    private record FlashReservation(long id, long flashSaleId, int grams) {
     }
 }

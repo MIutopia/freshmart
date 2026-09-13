@@ -21,14 +21,16 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 public class WeighingAdjustmentService {
     private final JdbcTemplate tradeJdbcTemplate;
     private final JdbcTemplate merchantJdbcTemplate;
+    private final JdbcTemplate userJdbcTemplate;
     private final PlatformRuleService platformRuleService;
     private final AuditLogService auditLogService;
 
     public WeighingAdjustmentService(@Qualifier("tradeJdbcTemplate") JdbcTemplate tradeJdbcTemplate,
             @Qualifier("merchantJdbcTemplate") JdbcTemplate merchantJdbcTemplate, PlatformRuleService platformRuleService,
-            AuditLogService auditLogService) {
+            @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate, AuditLogService auditLogService) {
         this.tradeJdbcTemplate = tradeJdbcTemplate;
         this.merchantJdbcTemplate = merchantJdbcTemplate;
+        this.userJdbcTemplate = userJdbcTemplate;
         this.platformRuleService = platformRuleService;
         this.auditLogService = auditLogService;
     }
@@ -44,9 +46,9 @@ public class WeighingAdjustmentService {
             return existing;
         }
         OrderSnapshot order = tradeJdbcTemplate.query("""
-                SELECT id, merchant_id, goods_amount, status FROM orders WHERE id = ?
+                SELECT id, merchant_id, user_id, trade_id, goods_amount, status FROM orders WHERE id = ?
                 """, (rs, row) -> new OrderSnapshot(rs.getLong("id"), rs.getLong("merchant_id"),
-                rs.getBigDecimal("goods_amount"), rs.getString("status")), orderId).stream().findFirst()
+                rs.getLong("user_id"), rs.getLong("trade_id"), rs.getBigDecimal("goods_amount"), rs.getString("status")), orderId).stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "order not found"));
         if (actualGoodsAmount == null || actualGoodsAmount.signum() < 0) {
             throw new ResponseStatusException(BAD_REQUEST, "actual goods amount must not be negative");
@@ -75,6 +77,7 @@ public class WeighingAdjustmentService {
         } catch (org.springframework.dao.DuplicateKeyException exception) {
             throw new ResponseStatusException(CONFLICT, "an adjustment already exists for this order");
         }
+        settle(order, settlement, adjustmentId);
         auditLogService.record(operator.userId(), "WEIGHING_ADJUSTMENT_SUBMITTED", "ORDER", Long.toString(order.id()), sourceIp);
         return new AdjustmentView(adjustmentId, order.id(), order.merchantId(), order.goodsAmount(), actualGoodsAmount,
                 settlement.action().name(), settlement.refundAmount(), settlement.absorbedAmount(), LocalDateTime.now());
@@ -92,7 +95,40 @@ public class WeighingAdjustmentService {
                 .stream().findFirst().orElse(null);
     }
 
-    private record OrderSnapshot(long id, long merchantId, BigDecimal goodsAmount, String status) {
+    private void settle(OrderSnapshot order, WeighingSettlementPolicy.Settlement settlement, String adjustmentId) {
+        if (settlement.action() == WeighingSettlementPolicy.SettlementAction.REFUND_USER) {
+            String reference = "WEIGH-REFUND-" + order.id();
+            userJdbcTemplate.update("""
+                    UPDATE wallet_accounts SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND status = 'ACTIVE'
+                    """, settlement.refundAmount(), order.userId());
+            BigDecimal balance = userJdbcTemplate.query("SELECT balance FROM wallet_accounts WHERE user_id = ?",
+                    (rs, row) -> rs.getBigDecimal(1), order.userId()).stream().findFirst()
+                    .orElseThrow(() -> new ResponseStatusException(CONFLICT, "user wallet is unavailable"));
+            userJdbcTemplate.update("""
+                    INSERT IGNORE INTO wallet_transactions (wallet_id, trade_id, transaction_type, amount, balance_after, idempotency_key)
+                    SELECT id, ?, 'WEIGHING_REFUND', ?, ?, ? FROM wallet_accounts WHERE user_id = ?
+                    """, order.tradeId(), settlement.refundAmount(), balance, reference, order.userId());
+            markSettled(order.id(), reference);
+        } else if (settlement.action() == WeighingSettlementPolicy.SettlementAction.PLATFORM_ABSORB) {
+            String reference = "WEIGH-ABSORB-" + order.id();
+            tradeJdbcTemplate.update("""
+                    INSERT IGNORE INTO fee_ledgers (trade_id, order_id, merchant_id, fee_type, amount, direction,
+                        reference_type, reference_id, idempotency_key)
+                    VALUES (?, ?, ?, 'WEIGHING_PLATFORM_ABSORB', ?, 'DEBIT', 'WEIGHING', ?, ?)
+                    """, order.tradeId(), order.id(), order.merchantId(), settlement.absorbedAmount(), adjustmentId, reference);
+            markSettled(order.id(), reference);
+        }
+    }
+
+    private void markSettled(long orderId, String reference) {
+        tradeJdbcTemplate.update("""
+                UPDATE weighing_adjustments SET settled_at = CURRENT_TIMESTAMP, settlement_reference = ?
+                WHERE order_id = ? AND settled_at IS NULL
+                """, reference, orderId);
+    }
+
+    private record OrderSnapshot(long id, long merchantId, long userId, long tradeId, BigDecimal goodsAmount, String status) {
     }
 
     public record AdjustmentView(String adjustmentId, long orderId, long merchantId, BigDecimal prepaidGoodsAmount,

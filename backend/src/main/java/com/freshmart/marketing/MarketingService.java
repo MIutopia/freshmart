@@ -69,6 +69,27 @@ public class MarketingService {
     }
 
     @Transactional("merchantTransactionManager")
+    public long createFlashSale(CurrentUser user, long productId, BigDecimal salePricePerKg, int totalGrams,
+            int perUserLimitGrams, LocalDateTime startsAt, LocalDateTime endsAt) {
+        long merchantId = requireActiveMerchant(user);
+        if (salePricePerKg == null || salePricePerKg.signum() < 0 || totalGrams <= 0 || perUserLimitGrams <= 0
+                || startsAt == null || endsAt == null || !endsAt.isAfter(startsAt)) {
+            throw new ResponseStatusException(BAD_REQUEST, "flash sale fields are invalid");
+        }
+        boolean ownsProduct = !jdbcTemplate.query("SELECT id FROM products WHERE id = ? AND merchant_id = ? AND status = 'ACTIVE'",
+                (rs, row) -> rs.getLong(1), productId, merchantId).isEmpty();
+        if (!ownsProduct) {
+            throw new ResponseStatusException(FORBIDDEN, "active product is not owned by the merchant");
+        }
+        jdbcTemplate.update("""
+                INSERT INTO flash_sale_items (merchant_id, product_id, sale_price_per_kg, total_grams, per_user_limit_grams,
+                    starts_at, ends_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? <= CURRENT_TIMESTAMP THEN 'ACTIVE' ELSE 'SCHEDULED' END)
+                """, merchantId, productId, salePricePerKg, totalGrams, perUserLimitGrams, startsAt, endsAt, startsAt);
+        return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    @Transactional("merchantTransactionManager")
     public long createMembershipLevel(CurrentUser admin, String name, int minPoints, BigDecimal discountRate) {
         if (name == null || name.isBlank() || minPoints < 0 || discountRate == null
                 || discountRate.compareTo(BigDecimal.ZERO) < 0 || discountRate.compareTo(BigDecimal.valueOf(100)) > 0) {

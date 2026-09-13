@@ -3,6 +3,7 @@ package com.freshmart.refund;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freshmart.auth.CurrentUser;
+import com.freshmart.platform.PlatformRuleService;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,16 +24,19 @@ public class RefundService {
     private final JdbcTemplate deliveryJdbcTemplate;
     private final JdbcTemplate userJdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final PlatformRuleService platformRuleService;
     private final int windowMinutes;
 
     public RefundService(@Qualifier("tradeJdbcTemplate") JdbcTemplate tradeJdbcTemplate,
             @Qualifier("deliveryJdbcTemplate") JdbcTemplate deliveryJdbcTemplate,
             @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate, ObjectMapper objectMapper,
+            PlatformRuleService platformRuleService,
             @Value("${commerce.refund.default-window-minutes:1440}") int windowMinutes) {
         this.tradeJdbcTemplate = tradeJdbcTemplate;
         this.deliveryJdbcTemplate = deliveryJdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
         this.objectMapper = objectMapper;
+        this.platformRuleService = platformRuleService;
         this.windowMinutes = windowMinutes;
     }
 
@@ -62,7 +66,8 @@ public class RefundService {
                 SELECT delivered_at FROM delivery_tasks WHERE order_id = ? AND status = 'DELIVERED'
                 """, (rs, row) -> rs.getObject(1, LocalDateTime.class), orderId).stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(CONFLICT, "order has not been delivered"));
-        if (deliveredAt.plusMinutes(windowMinutes).isBefore(LocalDateTime.now())) {
+        int configuredWindowMinutes = platformRuleService.integerOrDefault("refund.default.window.minutes", windowMinutes);
+        if (deliveredAt.plusMinutes(configuredWindowMinutes).isBefore(LocalDateTime.now())) {
             throw new ResponseStatusException(CONFLICT, "refund window has expired");
         }
         String refundNo = "R" + UUID.randomUUID().toString().replace("-", "").substring(0, 24).toUpperCase();
@@ -117,8 +122,42 @@ public class RefundService {
                 INSERT INTO fee_ledgers (trade_id, order_id, fee_type, amount, direction, reference_type, reference_id, idempotency_key)
                 VALUES (?, ?, 'REFUND', ?, 'DEBIT', 'REFUND', ?, ?)
                 """, refund.tradeId(), refund.orderId(), refund.amount(), refund.refundNo(), "REFUND-" + refund.refundNo());
+        reverseSettlement(refund);
+        recordInventoryDisposition(refund);
         rollbackPoints(refund);
         return refund.toView("REFUNDED");
+    }
+
+    private void reverseSettlement(RefundDetail refund) {
+        Settlement settlement = tradeJdbcTemplate.query("""
+                SELECT id, commission_amount FROM merchant_settlements
+                WHERE order_id = ? AND status <> 'REVERSED' FOR UPDATE
+                """, (rs, row) -> new Settlement(rs.getLong("id"), rs.getBigDecimal("commission_amount")),
+                refund.orderId()).stream().findFirst().orElse(null);
+        if (settlement == null) {
+            return;
+        }
+        int updated = tradeJdbcTemplate.update("""
+                UPDATE merchant_settlements SET status = 'REVERSED', reversed_at = CURRENT_TIMESTAMP,
+                    reversal_reason = 'FULL_ORDER_REFUND'
+                WHERE id = ? AND status <> 'REVERSED'
+                """, settlement.id());
+        if (updated > 0) {
+            tradeJdbcTemplate.update("""
+                    INSERT INTO fee_ledgers (trade_id, order_id, merchant_id, fee_type, amount, direction,
+                        reference_type, reference_id, idempotency_key)
+                    SELECT ?, ?, merchant_id, 'PLATFORM_COMMISSION_REVERSAL', ?, 'DEBIT', 'REFUND', ?, ?
+                    FROM merchant_settlements WHERE id = ?
+                    """, refund.tradeId(), refund.orderId(), settlement.commissionAmount(), refund.refundNo(),
+                    "COMMISSION-REVERSAL-" + refund.refundNo(), settlement.id());
+        }
+    }
+
+    private void recordInventoryDisposition(RefundDetail refund) {
+        tradeJdbcTemplate.update("""
+                INSERT IGNORE INTO refund_inventory_dispositions (refund_id, order_id, disposition, reason)
+                VALUES (?, ?, 'PENDING_INSPECTION', ?)
+                """, refund.id(), refund.orderId(), refund.issueType() + "_DELIVERED_REFUND");
     }
 
     private void refundWallet(RefundDetail refund) {
@@ -180,6 +219,9 @@ public class RefundService {
         private RefundView toView(String targetStatus) {
             return new RefundView(id, refundNo, orderId, issueType, amount, targetStatus, deliveredAt);
         }
+    }
+
+    private record Settlement(long id, BigDecimal commissionAmount) {
     }
 
     public record RefundView(long id, String refundNo, long orderId, String issueType, BigDecimal amount,

@@ -401,9 +401,27 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.order_items (
   user_goods_amount DECIMAL(10,2) NOT NULL,
   platform_price_subsidy_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   batch_promotion_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  flash_sale_id BIGINT NULL,
+  flash_sale_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_order_item_order (order_id),
   KEY idx_order_item_product (product_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_merchant.flash_sale_items (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  merchant_id BIGINT NOT NULL,
+  product_id BIGINT NOT NULL,
+  sale_price_per_kg DECIMAL(10,2) NOT NULL,
+  total_grams INT NOT NULL,
+  reserved_grams INT NOT NULL DEFAULT 0,
+  sold_grams INT NOT NULL DEFAULT 0,
+  per_user_limit_grams INT NOT NULL,
+  starts_at DATETIME NOT NULL,
+  ends_at DATETIME NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'SCHEDULED',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_flash_sale_product_active (product_id, status, starts_at, ends_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.order_item_batch_allocations (
@@ -447,6 +465,20 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.inventory_reservations (
   KEY idx_reservation_expiration (status, expires_at),
   KEY idx_reservation_trade (trade_id),
   KEY idx_reservation_order_item (order_item_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.flash_sale_reservations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  flash_sale_id BIGINT NOT NULL,
+  trade_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  reserved_grams INT NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+  expires_at DATETIME NOT NULL,
+  released_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_flash_sale_trade (flash_sale_id, trade_id),
+  KEY idx_flash_sale_reservation_expiry (status, expires_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
@@ -505,6 +537,35 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.fee_ledgers (
   KEY idx_fee_merchant (merchant_id, occurred_at)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_trade.merchant_settlements (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  merchant_id BIGINT NOT NULL,
+  order_id BIGINT NOT NULL,
+  gross_amount DECIMAL(10,2) NOT NULL,
+  commission_base_amount DECIMAL(10,2) NOT NULL,
+  platform_price_subsidy_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  commission_rate DECIMAL(5,2) NOT NULL,
+  commission_amount DECIMAL(10,2) NOT NULL,
+  net_amount DECIMAL(10,2) NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  settled_at DATETIME NULL,
+  reversed_at DATETIME NULL,
+  reversal_reason VARCHAR(80) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_merchant_order_settlement (merchant_id, order_id),
+  KEY idx_settlement_merchant_status (merchant_id, status, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_trade.refund_inventory_dispositions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  refund_id BIGINT NOT NULL UNIQUE,
+  order_id BIGINT NOT NULL,
+  disposition VARCHAR(32) NOT NULL,
+  reason VARCHAR(120) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_refund_inventory_order (order_id, created_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_trade.weighing_adjustments (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   order_id BIGINT NOT NULL,
@@ -519,6 +580,8 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.weighing_adjustments (
   idempotency_key VARCHAR(80) NOT NULL UNIQUE,
   created_by BIGINT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  settled_at DATETIME NULL,
+  settlement_reference VARCHAR(80) NULL,
   UNIQUE KEY uk_weighing_order (order_id),
   KEY idx_weighing_merchant (merchant_id, created_at)
 ) ENGINE=InnoDB;
@@ -542,6 +605,8 @@ CREATE TABLE IF NOT EXISTS freshmart_log.inbox_messages (
   message_type VARCHAR(32) NOT NULL,
   title VARCHAR(120) NOT NULL,
   body VARCHAR(1000) NOT NULL,
+  card_svg_url VARCHAR(512) NULL,
+  card_svg_content LONGTEXT NULL,
   business_type VARCHAR(32) NULL,
   business_id BIGINT NULL,
   read_at DATETIME NULL,

@@ -42,6 +42,15 @@ public class MarketingController {
                 request.totalQuantity()));
     }
 
+    @PostMapping("/api/merchant/marketing/flash-sales")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('MERCHANT')")
+    public IdResponse createFlashSale(@AuthenticationPrincipal CurrentUser user,
+            @Valid @RequestBody FlashSaleRequest request) {
+        return new IdResponse(marketingService.createFlashSale(user, request.productId(), request.salePricePerKg(),
+                request.totalGrams(), request.perUserLimitGrams(), request.startsAt(), request.endsAt()));
+    }
+
     @PostMapping("/api/admin/marketing/membership-levels")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('ADMIN')")
@@ -65,6 +74,11 @@ public class MarketingController {
             @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt,
             @jakarta.validation.constraints.Positive int totalQuantity) {
     }
+
+    public record FlashSaleRequest(@jakarta.validation.constraints.Positive long productId,
+            @NotNull @jakarta.validation.constraints.DecimalMin("0.00") BigDecimal salePricePerKg,
+            @jakarta.validation.constraints.Positive int totalGrams, @jakarta.validation.constraints.Positive int perUserLimitGrams,
+            @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt) { }
 
     public record MembershipLevelRequest(@NotBlank String name,
             @jakarta.validation.constraints.PositiveOrZero int minPoints,
