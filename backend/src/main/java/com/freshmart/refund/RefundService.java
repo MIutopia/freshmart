@@ -138,7 +138,11 @@ public class RefundService {
             completeRefund(refund, reviewNote, admin.userId());
             return refund.toView("REFUND_SUCCESS");
         }
-        paymentAdapterFactory.refund().createRefund(refund.paymentId(), refund.orderId(), refund.refundNo(), refund.amount(), "REFUND-" + refund.refundNo(), admin.userId());
+        // 必须复用申请时写入的幂等键：退款适配器会校验它与 refund_orders.idempotency_key 一致
+        String idempotencyKey = tradeJdbcTemplate.queryForObject(
+                "SELECT idempotency_key FROM refund_orders WHERE id = ?", String.class, refund.id());
+        paymentAdapterFactory.refund().createRefund(refund.paymentId(), refund.orderId(), refund.refundNo(),
+                refund.amount(), idempotencyKey, admin.userId());
         tradeJdbcTemplate.update("UPDATE refund_orders SET reason = CONCAT(reason, '\nReview: ', ?), reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'MANUAL_PROCESS'", reviewNote.trim(), admin.userId(), refund.id());
         return refund.toView("MANUAL_PROCESS");
     }

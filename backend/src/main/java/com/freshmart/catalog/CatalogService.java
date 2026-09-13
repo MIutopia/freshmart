@@ -42,6 +42,13 @@ public class CatalogService {
         return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     }
 
+    public List<CategoryView> listCategories() {
+        return jdbcTemplate.query("""
+                SELECT id, parent_id, name, sort_order FROM product_categories ORDER BY sort_order, id
+                """, (rs, row) -> new CategoryView(rs.getLong("id"), (Long) rs.getObject("parent_id"),
+                rs.getString("name"), rs.getInt("sort_order")));
+    }
+
     @Transactional("merchantTransactionManager")
     public long createWarehouse(CurrentUser user, long deliveryZoneId, String name, String code, String address) {
         long merchantId = merchantId(user);
@@ -232,5 +239,8 @@ public class CatalogService {
 
     public record WarehouseView(long id, long merchantId, long deliveryZoneId, String name, String code,
             String address, String status) {
+    }
+
+    public record CategoryView(long id, Long parentId, String name, int sortOrder) {
     }
 }

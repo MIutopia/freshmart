@@ -92,7 +92,7 @@ public class MerchantSettlementService {
         return tradeJdbcTemplate.query("""
                 SELECT fee_type, direction, COALESCE(SUM(amount), 0) amount, COUNT(*) entry_count
                 FROM fee_ledgers
-                WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
+                WHERE occurred_at >= ? AND occurred_at < DATE_ADD(?, INTERVAL 1 DAY)
                 GROUP BY fee_type, direction ORDER BY fee_type, direction
                 """, (rs, row) -> new MerchantOperationsController.PlatformCostView(rs.getString("fee_type"),
                 rs.getString("direction"), rs.getBigDecimal("amount"), rs.getLong("entry_count")), from, to);

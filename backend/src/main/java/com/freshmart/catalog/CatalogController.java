@@ -81,6 +81,12 @@ public class CatalogController {
                 request.availableGrams(), request.expiresOn()));
     }
 
+    @GetMapping("/api/admin/categories")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<CatalogService.CategoryView> listCategories() {
+        return catalogService.listCategories();
+    }
+
     @GetMapping("/api/catalog/products")
     public List<CatalogService.ProductView> listProducts(@RequestParam(required = false) Long categoryId) {
         return catalogService.listProducts(categoryId);

@@ -65,6 +65,12 @@ public class DeliveryController {
         return deliveryService.listMyPerformance(rider, from, to);
     }
 
+    @GetMapping("/api/admin/delivery-tasks")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<DeliveryService.DeliveryTaskView> listTasks(@RequestParam(required = false) String status) {
+        return deliveryService.listTasks(status);
+    }
+
     @PostMapping("/api/admin/delivery-tasks/{taskId}/assign")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasRole('ADMIN')")

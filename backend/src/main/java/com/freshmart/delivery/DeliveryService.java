@@ -53,14 +53,30 @@ public class DeliveryService {
     public List<DeliveryTaskView> listMyTasks(CurrentUser rider) {
         return jdbcTemplate.query("""
                 SELECT id, order_id, merchant_id, warehouse_id, delivery_zone_id, status, accept_deadline_at,
-                       assigned_at, accepted_at, picked_at, delivered_at, proof_url, exception_note
+                       assigned_at, accepted_at, picked_at, delivered_at, proof_url, exception_note, rider_user_id
                 FROM delivery_tasks WHERE rider_user_id = ? ORDER BY assigned_at DESC, id DESC
                 """, (rs, row) -> new DeliveryTaskView(
                 rs.getLong("id"), rs.getLong("order_id"), rs.getLong("merchant_id"), rs.getLong("warehouse_id"),
                 rs.getLong("delivery_zone_id"), rs.getString("status"), rs.getObject("accept_deadline_at", LocalDateTime.class),
                 rs.getObject("assigned_at", LocalDateTime.class), rs.getObject("accepted_at", LocalDateTime.class),
                 rs.getObject("picked_at", LocalDateTime.class), rs.getObject("delivered_at", LocalDateTime.class),
-                rs.getString("proof_url"), rs.getString("exception_note")), rider.userId());
+                rs.getString("proof_url"), rs.getString("exception_note"),
+                rs.getObject("rider_user_id", Long.class)), rider.userId());
+    }
+
+    /** 管理员视角：按状态查看配送任务，用于派单 */
+    public List<DeliveryTaskView> listTasks(String status) {
+        return jdbcTemplate.query("""
+                SELECT id, order_id, merchant_id, warehouse_id, delivery_zone_id, status, accept_deadline_at,
+                       assigned_at, accepted_at, picked_at, delivered_at, proof_url, exception_note, rider_user_id
+                FROM delivery_tasks WHERE (? IS NULL OR status = ?) ORDER BY id DESC LIMIT 200
+                """, (rs, row) -> new DeliveryTaskView(
+                rs.getLong("id"), rs.getLong("order_id"), rs.getLong("merchant_id"), rs.getLong("warehouse_id"),
+                rs.getLong("delivery_zone_id"), rs.getString("status"), rs.getObject("accept_deadline_at", LocalDateTime.class),
+                rs.getObject("assigned_at", LocalDateTime.class), rs.getObject("accepted_at", LocalDateTime.class),
+                rs.getObject("picked_at", LocalDateTime.class), rs.getObject("delivered_at", LocalDateTime.class),
+                rs.getString("proof_url"), rs.getString("exception_note"),
+                rs.getObject("rider_user_id", Long.class)), status, status);
     }
 
     @Transactional("deliveryTransactionManager")
@@ -150,7 +166,8 @@ public class DeliveryService {
 
     public record DeliveryTaskView(long id, long orderId, long merchantId, long warehouseId, long deliveryZoneId,
             String status, LocalDateTime acceptDeadlineAt, LocalDateTime assignedAt, LocalDateTime acceptedAt,
-            LocalDateTime pickedAt, LocalDateTime deliveredAt, String proofUrl, String exceptionNote) {
+            LocalDateTime pickedAt, LocalDateTime deliveredAt, String proofUrl, String exceptionNote,
+            Long riderUserId) {
     }
 
     public record RiderPerformanceView(LocalDate statDate, int assignedCount, int acceptedCount, int deliveredCount,

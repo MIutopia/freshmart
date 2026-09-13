@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
@@ -70,7 +71,7 @@ public class MediaStorageService {
     public MediaAssetView describeOwned(CurrentUser user, String url) {
         String prefix = "/api/media/";
         if (url == null || !url.startsWith(prefix) || url.length() != prefix.length() + 32) {
-            throw new IllegalArgumentException("evidence must be an uploaded media URL");
+            throw new ResponseStatusException(BAD_REQUEST, "evidence must be an uploaded media URL");
         }
         MediaAsset asset = find(url.substring(prefix.length()));
         if (asset.uploaderUserId() != user.userId()) {
