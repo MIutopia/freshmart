@@ -64,14 +64,23 @@ public class InboxService {
     @Transactional("logTransactionManager")
     public MessageView sendWithSvg(long userId, String messageType, String title, String body, String cardSvgUrl,
             String cardSvgContent, String businessType, Long businessId) {
+        return sendWithSvgIdempotently(userId, messageType, title, body, cardSvgUrl, cardSvgContent, businessType,
+                businessId, null);
+    }
+
+    @Transactional("logTransactionManager")
+    public MessageView sendWithSvgIdempotently(long userId, String messageType, String title, String body, String cardSvgUrl,
+            String cardSvgContent, String businessType, Long businessId, String idempotencyKey) {
         if (messageType == null || messageType.isBlank() || title == null || title.isBlank()
                 || body == null || body.isBlank()) {
             throw new ResponseStatusException(BAD_REQUEST, "message type, title and body are required");
         }
         logJdbcTemplate.update("""
-                INSERT INTO inbox_messages (user_id, message_type, title, body, card_svg_url, card_svg_content, business_type, business_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, userId, messageType.trim(), title.trim(), body.trim(), cardSvgUrl, cardSvgContent, businessType, businessId);
+                INSERT INTO inbox_messages (user_id, message_type, title, body, card_svg_url, card_svg_content, business_type, business_id, idempotency_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)
+                """, userId, messageType.trim(), title.trim(), body.trim(), cardSvgUrl, cardSvgContent, businessType, businessId,
+                idempotencyKey);
         return logJdbcTemplate.query("""
                 SELECT id, message_type, title, body, card_svg_url, card_svg_content, business_type, business_id, read_at, created_at
                 FROM inbox_messages WHERE id = LAST_INSERT_ID()

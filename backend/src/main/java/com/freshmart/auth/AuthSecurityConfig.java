@@ -28,6 +28,7 @@ public class AuthSecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/catalog/products").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/public/payment-qr").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info", "/error").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(bearerTokenFilter, UsernamePasswordAuthenticationFilter.class)

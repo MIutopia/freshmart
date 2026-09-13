@@ -8,6 +8,7 @@ import com.freshmart.order.MarketPriceSettlementPolicy;
 import com.freshmart.marketing.BatchPromotionPolicy;
 import com.freshmart.marketing.FlashSalePolicy;
 import com.freshmart.marketing.PromotionCalculator;
+import com.freshmart.media.MediaStorageService;
 import com.freshmart.platform.PlatformRuleService;
 import com.freshmart.payment.PaymentAdapterFactory;
 import com.freshmart.payment.FinancialStatusLogService;
@@ -50,6 +51,7 @@ public class TradeService {
     private final String personalWechatQrUrl;
     private final PaymentAdapterFactory paymentAdapterFactory;
     private final FinancialStatusLogService statusLogService;
+    private final MediaStorageService mediaStorageService;
 
     public TradeService(
             @Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
@@ -63,7 +65,8 @@ public class TradeService {
             @Value("${commerce.market-price.max-markup-rate:5.00}") BigDecimal maxMarkupRate,
             @Value("${commerce.points-per-currency:1.00}") BigDecimal pointsPerCurrency,
             @Value("${commerce.payment.personal-wechat-qr-url:}") String personalWechatQrUrl,
-            PaymentAdapterFactory paymentAdapterFactory, FinancialStatusLogService statusLogService) {
+            PaymentAdapterFactory paymentAdapterFactory, FinancialStatusLogService statusLogService,
+            MediaStorageService mediaStorageService) {
         this.jdbcTemplate = jdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
         this.merchantJdbcTemplate = merchantJdbcTemplate;
@@ -77,17 +80,24 @@ public class TradeService {
         this.personalWechatQrUrl = personalWechatQrUrl;
         this.paymentAdapterFactory = paymentAdapterFactory;
         this.statusLogService = statusLogService;
+        this.mediaStorageService = mediaStorageService;
     }
 
     @Transactional("tradeTransactionManager")
     public TradeView create(CurrentUser user, long deliveryZoneId, Map<String, Object> addressSnapshot,
             List<CheckoutLine> requestedLines, String idempotencyKey) {
-        return create(user, deliveryZoneId, addressSnapshot, requestedLines, List.of(), idempotencyKey);
+        return create(user, deliveryZoneId, addressSnapshot, requestedLines, List.of(), 0, idempotencyKey);
     }
 
     @Transactional("tradeTransactionManager")
     public TradeView create(CurrentUser user, long deliveryZoneId, Map<String, Object> addressSnapshot,
             List<CheckoutLine> requestedLines, List<Long> couponIds, String idempotencyKey) {
+        return create(user, deliveryZoneId, addressSnapshot, requestedLines, couponIds, 0, idempotencyKey);
+    }
+
+    @Transactional("tradeTransactionManager")
+    public TradeView create(CurrentUser user, long deliveryZoneId, Map<String, Object> addressSnapshot,
+            List<CheckoutLine> requestedLines, List<Long> couponIds, int pointsToRedeem, String idempotencyKey) {
         TradeView existing = findByIdempotencyKey(idempotencyKey);
         if (existing != null) {
             if (existing.userId() != user.userId()) {
@@ -184,10 +194,10 @@ public class TradeService {
             }
         }
         Map<Long, List<PromotionCalculator.Promotion>> merchantPromotions = loadPromotions(user.userId(), couponIds, merchantLines.keySet());
-        int points = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                (rs, row) -> rs.getInt(1), user.userId()).stream().findFirst().orElse(0);
+        int points = availablePoints(user.userId());
         BigDecimal finalDiscountAmount = BigDecimal.ZERO;
         BigDecimal finalFreightAmount = BigDecimal.ZERO;
+        List<OrderSettlement> orderSettlements = new ArrayList<>();
         for (Map.Entry<Long, Long> entry : orderIds.entrySet()) {
             long merchantId = entry.getKey();
             BigDecimal merchantBatchDiscount = batchDiscounts.getOrDefault(merchantId, BigDecimal.ZERO);
@@ -214,11 +224,31 @@ public class TradeService {
                     json(Map.of("priceSource", "MARKET_CAP", "batchPromotionDiscount", merchantBatchDiscount,
                             "flashSaleDiscount", merchantFlashDiscount,
                             "marketingDiscount", discount.discountAmount())), entry.getValue());
+            orderSettlements.add(new OrderSettlement(entry.getValue(), payableGoods, merchantDiscount, merchantFreight));
         }
-        jdbcTemplate.update("UPDATE trade_orders SET discount_amount = ?, freight_amount = ?, payable_amount = ? WHERE id = ?",
-                finalDiscountAmount, finalFreightAmount, goodsAmount.subtract(finalDiscountAmount).add(finalFreightAmount), tradeId);
+        BigDecimal eligibleGoodsAmount = orderSettlements.stream().map(OrderSettlement::payableGoodsAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        int pointsPerCurrency = platformRuleService.integerOrDefault("points.redeem.per.currency", 1000);
+        BigDecimal redemptionMaximumRate = platformRuleService.decimalOrDefault("points.redeem.max.rate", new BigDecimal("3.00"));
+        com.freshmart.marketing.PointsCalculator.Redemption redemption;
+        try {
+            redemption = com.freshmart.marketing.PointsCalculator.redemption(pointsToRedeem, points, eligibleGoodsAmount,
+                    pointsPerCurrency, redemptionMaximumRate);
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(BAD_REQUEST, exception.getMessage());
+        }
+        distributePointsRedemption(orderSettlements, redemption, pointsPerCurrency);
+        finalDiscountAmount = finalDiscountAmount.add(redemption.discountAmount());
+        jdbcTemplate.update("UPDATE trade_orders SET discount_amount = ?, redeemed_points = ?, points_discount_amount = ?, freight_amount = ?, payable_amount = ? WHERE id = ?",
+                finalDiscountAmount, redemption.usedPoints(), redemption.discountAmount(), finalFreightAmount,
+                goodsAmount.subtract(finalDiscountAmount).add(finalFreightAmount), tradeId);
         if (!reserveCoupons(user.userId(), tradeId, couponIds)) {
             throw new ResponseStatusException(CONFLICT, "selected coupon is no longer available");
+        }
+        if (!reservePoints(user.userId(), tradeId, tradeNo, redemption.usedPoints())) {
+            userJdbcTemplate.update("UPDATE user_coupons SET status = 'AVAILABLE', used_trade_id = NULL WHERE user_id = ? AND used_trade_id = ? AND status = 'RESERVED'",
+                    user.userId(), tradeId);
+            throw new ResponseStatusException(CONFLICT, "points balance is no longer sufficient");
         }
         return new TradeView(tradeId, tradeNo, user.userId(), "PENDING_PAYMENT", goodsAmount, finalFreightAmount, finalDiscountAmount,
                 goodsAmount.subtract(finalDiscountAmount).add(finalFreightAmount), expiresAt, List.copyOf(orderNos));
@@ -244,6 +274,10 @@ public class TradeService {
     @Transactional("tradeTransactionManager")
     public PaymentView submitPaymentProof(CurrentUser user, String tradeNo, String proofUrl, String remarkText) {
         TradeView trade = requireOwnedPendingTrade(user, tradeNo);
+        MediaStorageService.MediaAssetView proof = mediaStorageService.describeOwned(user, proofUrl);
+        if (!proof.contentType().startsWith("image/")) {
+            throw new ResponseStatusException(BAD_REQUEST, "payment proof must be an image");
+        }
         String paymentNo = jdbcTemplate.query("SELECT payment_no FROM payment_orders WHERE trade_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1",
                 (rs, row) -> rs.getString(1), trade.id()).stream().findFirst()
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "pending payment not found"));
@@ -494,13 +528,72 @@ public class TradeService {
         if (points <= 0) {
             return;
         }
-        Integer balance = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                (rs, row) -> rs.getInt(1), trade.userId()).stream().findFirst().orElse(0);
-        int newBalance = Math.addExact(balance, points);
+        Integer existing = userJdbcTemplate.queryForObject("SELECT COUNT(*) FROM points_transactions WHERE idempotency_key = ?",
+                Integer.class, "POINTS-" + trade.tradeNo());
+        if (existing != null && existing > 0) {
+            return;
+        }
+        ensurePointAccount(trade.userId());
+        userJdbcTemplate.update("UPDATE user_point_accounts SET available_points = available_points + ? WHERE user_id = ?",
+                points, trade.userId());
+        int newBalance = availablePoints(trade.userId());
         userJdbcTemplate.update("""
                 INSERT IGNORE INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
                 VALUES (?, ?, ?, ?, 'TRADE_PAYMENT', ?)
                 """, trade.userId(), trade.id(), points, newBalance, "POINTS-" + trade.tradeNo());
+    }
+
+    private void distributePointsRedemption(List<OrderSettlement> settlements,
+            com.freshmart.marketing.PointsCalculator.Redemption redemption, int pointsPerCurrency) {
+        if (redemption.usedPoints() == 0 || settlements.isEmpty()) {
+            return;
+        }
+        BigDecimal totalGoods = settlements.stream().map(OrderSettlement::payableGoodsAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal remainingAmount = redemption.discountAmount();
+        int remainingPoints = redemption.usedPoints();
+        for (int index = 0; index < settlements.size(); index++) {
+            OrderSettlement settlement = settlements.get(index);
+            boolean last = index == settlements.size() - 1;
+            BigDecimal discount = last ? remainingAmount : settlement.payableGoodsAmount()
+                    .multiply(redemption.discountAmount()).divide(totalGoods, 2, java.math.RoundingMode.DOWN);
+            int usedPoints = last ? remainingPoints : discount.multiply(BigDecimal.valueOf(pointsPerCurrency)).intValueExact();
+            jdbcTemplate.update("""
+                    UPDATE orders SET discount_amount = ?, payable_amount = ?, redeemed_points = ?, points_discount_amount = ?,
+                        pricing_snapshot = JSON_SET(pricing_snapshot, '$.pointsDiscount', ?, '$.redeemedPoints', ?)
+                    WHERE id = ?
+                    """, settlement.discountAmount().add(discount), settlement.payableGoodsAmount().add(settlement.freightAmount()).subtract(discount),
+                    usedPoints, discount, discount, usedPoints, settlement.orderId());
+            remainingAmount = remainingAmount.subtract(discount);
+            remainingPoints -= usedPoints;
+        }
+    }
+
+    private boolean reservePoints(long userId, long tradeId, String tradeNo, int points) {
+        if (points == 0) {
+            return true;
+        }
+        ensurePointAccount(userId);
+        int updated = userJdbcTemplate.update("UPDATE user_point_accounts SET available_points = available_points - ? WHERE user_id = ? AND available_points >= ?",
+                points, userId, points);
+        if (updated == 0) {
+            return false;
+        }
+        userJdbcTemplate.update("""
+                INSERT INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
+                VALUES (?, ?, ?, ?, 'REDEMPTION_RESERVED', ?)
+                """, userId, tradeId, -points, availablePoints(userId), "POINTS-REDEEM-" + tradeNo);
+        return true;
+    }
+
+    private int availablePoints(long userId) {
+        ensurePointAccount(userId);
+        return userJdbcTemplate.query("SELECT available_points FROM user_point_accounts WHERE user_id = ?",
+                (rs, row) -> rs.getInt(1), userId).stream().findFirst().orElse(0);
+    }
+
+    private void ensurePointAccount(long userId) {
+        userJdbcTemplate.update("INSERT IGNORE INTO user_point_accounts (user_id) VALUES (?)", userId);
     }
 
     private boolean reserveCoupons(long userId, long tradeId, List<Long> couponIds) {
@@ -766,5 +859,9 @@ public class TradeService {
     }
 
     private record Coupon(long id, Long merchantId, String couponType, BigDecimal thresholdAmount, BigDecimal discountAmount) {
+    }
+
+    private record OrderSettlement(long orderId, BigDecimal payableGoodsAmount, BigDecimal discountAmount,
+            BigDecimal freightAmount) {
     }
 }

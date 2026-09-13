@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.util.List;
 import java.util.Map;
 import java.time.LocalDateTime;
@@ -43,7 +44,8 @@ public class TradeController {
         List<TradeService.CheckoutLine> lines = request.lines().stream()
                 .map(line -> new TradeService.CheckoutLine(line.productId(), line.weightGrams()))
                 .toList();
-        return tradeService.create(user, request.deliveryZoneId(), request.addressSnapshot(), lines, request.couponIds(), idempotencyKey);
+        return tradeService.create(user, request.deliveryZoneId(), request.addressSnapshot(), lines,
+                request.couponIds(), request.pointsToRedeem(), idempotencyKey);
     }
 
     @PostMapping("/api/payments/{tradeNo}/prepay")
@@ -132,7 +134,12 @@ public class TradeController {
     }
 
     public record CreateTradeRequest(@Positive long deliveryZoneId, @NotNull Map<String, Object> addressSnapshot,
-            @NotEmpty List<@Valid CheckoutLineRequest> lines, List<@Positive Long> couponIds) {
+            @NotEmpty List<@Valid CheckoutLineRequest> lines, List<@Positive Long> couponIds,
+            @PositiveOrZero int pointsToRedeem) {
+        public CreateTradeRequest(long deliveryZoneId, Map<String, Object> addressSnapshot,
+                List<CheckoutLineRequest> lines, List<Long> couponIds) {
+            this(deliveryZoneId, addressSnapshot, lines, couponIds, 0);
+        }
     }
 
     public record CheckoutLineRequest(@Positive long productId, @Positive int weightGrams) {

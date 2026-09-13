@@ -18,14 +18,16 @@ public class AiAssistantService {
     private final JdbcTemplate tradeJdbcTemplate;
     private final DeepSeekClient deepSeekClient;
     private final AuditLogService auditLogService;
+    private final AiInteractionAuditService aiInteractionAuditService;
 
     public AiAssistantService(@Qualifier("merchantJdbcTemplate") JdbcTemplate merchantJdbcTemplate,
             @Qualifier("tradeJdbcTemplate") JdbcTemplate tradeJdbcTemplate,
-            DeepSeekClient deepSeekClient, AuditLogService auditLogService) {
+            DeepSeekClient deepSeekClient, AuditLogService auditLogService, AiInteractionAuditService aiInteractionAuditService) {
         this.merchantJdbcTemplate = merchantJdbcTemplate;
         this.tradeJdbcTemplate = tradeJdbcTemplate;
         this.deepSeekClient = deepSeekClient;
         this.auditLogService = auditLogService;
+        this.aiInteractionAuditService = aiInteractionAuditService;
     }
 
     public AssistantReply reply(CurrentUser user, String message) {
@@ -53,9 +55,9 @@ public class AiAssistantService {
         String context = products.stream()
                 .map(product -> "%s|库存%d克|用户价%.2f元/千克".formatted(product.name(), product.availableGrams(), product.userPricePerKg()))
                 .collect(Collectors.joining("; "));
-        String answer = deepSeekClient.chat(
-                "你是生鲜商城导购。只能基于给定商品数据回答，不能编造库存、价格、优惠或承诺下单。回答使用简体中文，控制在120字以内。",
-                "用户需求：" + message.trim() + "\n可推荐商品：" + (context.isBlank() ? "无" : context));
+        String prompt = "用户需求：" + message.trim() + "\n可推荐商品：" + (context.isBlank() ? "无" : context);
+        String answer = chatWithAudit(user, "SHOPPING_GUIDE", Long.toString(user.userId()),
+                "你是生鲜商城导购。只能基于给定商品数据回答，不能编造库存、价格、优惠或承诺下单。回答使用简体中文，控制在120字以内。", prompt);
         auditLogService.record(user.userId(), "AI_SHOPPING_GUIDE", "USER", user.userId().toString(), null);
         return new AssistantReply("SHOPPING_GUIDE", answer, products, List.of());
     }
@@ -69,10 +71,22 @@ public class AiAssistantService {
         String context = orders.stream()
                 .map(order -> "%s|状态%s|金额%.2f元".formatted(order.orderNo(), order.status(), order.payableAmount()))
                 .collect(Collectors.joining("; "));
-        String answer = deepSeekClient.chat(
-                "你是生鲜商城订单助手。只能根据给定的当前用户订单回答，不得查询或推测其他用户数据。回答使用简体中文，控制在120字以内。",
-                "用户询问：" + message.trim() + "\n当前用户最近订单：" + (context.isBlank() ? "无" : context));
+        String prompt = "用户询问：" + message.trim() + "\n当前用户最近订单：" + (context.isBlank() ? "无" : context);
+        String answer = chatWithAudit(user, "ORDER_QUERY", Long.toString(user.userId()),
+                "你是生鲜商城订单助手。只能根据给定的当前用户订单回答，不得查询或推测其他用户数据。回答使用简体中文，控制在120字以内。", prompt);
         return new AssistantReply("ORDER_QUERY", answer, List.of(), orders);
+    }
+
+    private String chatWithAudit(CurrentUser user, String scenario, String subjectReference, String systemPrompt, String prompt) {
+        try {
+            String answer = deepSeekClient.chat(systemPrompt, prompt);
+            aiInteractionAuditService.success(user.userId(), scenario, subjectReference, deepSeekClient.modelName(), prompt, answer);
+            return answer;
+        } catch (org.springframework.web.server.ResponseStatusException exception) {
+            aiInteractionAuditService.failure(user.userId(), scenario, subjectReference, deepSeekClient.modelName(), prompt,
+                    exception.getStatusCode().toString());
+            throw exception;
+        }
     }
 
     public record AssistantReply(String intent, String answer, List<ProductView> products, List<OrderView> orders) { }

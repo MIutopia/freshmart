@@ -12,7 +12,13 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: ${MEDIA_MAX_SIZE:30MB}
+      max-request-size: ${MEDIA_MAX_REQUEST_SIZE:31MB}
 storage:
+  media:
+    root: ${MEDIA_STORAGE_ROOT:./data/media}
   datasource:
     user:
       url: ${USER_DB_URL:jdbc:mysql://127.0.0.1:3307/freshmart_user?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&connectionCollation=utf8mb4_unicode_ci}
@@ -84,6 +90,7 @@ commerce:
     personal-wechat-qr-url: ${PERSONAL_WECHAT_QR_URL:}
   notification:
     seasonal-card-channel: INBOX
+    seasonal-card-scan-interval-ms: ${SEASONAL_CARD_SCAN_INTERVAL_MS:60000}
   authentication:
     mode: PASSWORD
   market-price:

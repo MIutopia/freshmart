@@ -20,9 +20,11 @@ import org.springframework.web.bind.annotation.PutMapping;
 @RestController
 public class RefundController {
     private final RefundService refundService;
+    private final RefundAiReviewService refundAiReviewService;
 
-    public RefundController(RefundService refundService) {
+    public RefundController(RefundService refundService, RefundAiReviewService refundAiReviewService) {
         this.refundService = refundService;
+        this.refundAiReviewService = refundAiReviewService;
     }
 
     @PostMapping("/api/refunds")
@@ -62,6 +64,20 @@ public class RefundController {
         return refundService.retryManualRefund(admin, refundNo, request.reason());
     }
 
+    @PutMapping("/api/admin/refunds/{refundNo}/inventory-disposition")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATIONS')")
+    public RefundService.InventoryDispositionView processInventoryDisposition(@AuthenticationPrincipal CurrentUser operator,
+            @PathVariable String refundNo, @Valid @RequestBody InventoryDispositionRequest request) {
+        return refundService.processInventoryDisposition(operator, refundNo, request.disposition(), request.note());
+    }
+
+    @PostMapping("/api/admin/refunds/{refundNo}/ai-review-suggestion")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATIONS','FINANCE')")
+    public RefundAiReviewService.SuggestionView aiReviewSuggestion(@AuthenticationPrincipal CurrentUser operator,
+            @PathVariable String refundNo) {
+        return refundAiReviewService.suggest(operator, refundNo);
+    }
+
     public record RefundRequest(@Positive long orderId, @NotBlank String issueType,
             @NotBlank String description, @NotEmpty List<@NotBlank String> evidenceImages) {
     }
@@ -70,5 +86,8 @@ public class RefundController {
     }
 
     public record ManualRefundFailureRequest(@NotBlank String reason) {
+    }
+
+    public record InventoryDispositionRequest(@NotBlank String disposition, @NotBlank String note) {
     }
 }

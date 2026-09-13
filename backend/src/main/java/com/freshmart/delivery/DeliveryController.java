@@ -1,6 +1,7 @@
 package com.freshmart.delivery;
 
 import com.freshmart.auth.CurrentUser;
+import com.freshmart.platform.PlatformRuleService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -20,17 +21,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.beans.factory.annotation.Value;
 
 @RestController
 public class DeliveryController {
     private final DeliveryService deliveryService;
-    private final int acceptTimeoutMinutes;
 
-    public DeliveryController(DeliveryService deliveryService,
-            @Value("${commerce.delivery.accept-timeout-minutes:5}") int acceptTimeoutMinutes) {
+    public DeliveryController(DeliveryService deliveryService) {
         this.deliveryService = deliveryService;
-        this.acceptTimeoutMinutes = acceptTimeoutMinutes;
     }
 
     @PostMapping("/api/admin/delivery-zones")
@@ -72,7 +69,7 @@ public class DeliveryController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasRole('ADMIN')")
     public void assign(@PathVariable long taskId, @Valid @RequestBody AssignRequest request) {
-        deliveryService.assign(taskId, request.riderUserId(), acceptTimeoutMinutes);
+        deliveryService.assign(taskId, request.riderUserId());
     }
 
     @PutMapping("/api/delivery/tasks/{taskId}/accept")

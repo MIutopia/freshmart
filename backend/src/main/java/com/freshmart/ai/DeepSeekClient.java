@@ -61,4 +61,8 @@ public class DeepSeekClient {
             throw new ResponseStatusException(SERVICE_UNAVAILABLE, "DeepSeek API request failed");
         }
     }
+
+    public String modelName() {
+        return model;
+    }
 }

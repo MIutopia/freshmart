@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,12 +19,18 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 public class CatalogService {
     private final JdbcTemplate jdbcTemplate;
     private final JdbcTemplate deliveryJdbcTemplate;
+    private final com.freshmart.platform.PlatformRuleService platformRuleService;
+    private final BigDecimal fallbackMaxMarkupRate;
 
     public CatalogService(
             @Qualifier("merchantJdbcTemplate") JdbcTemplate jdbcTemplate,
-            @Qualifier("deliveryJdbcTemplate") JdbcTemplate deliveryJdbcTemplate) {
+            @Qualifier("deliveryJdbcTemplate") JdbcTemplate deliveryJdbcTemplate,
+            com.freshmart.platform.PlatformRuleService platformRuleService,
+            @Value("${commerce.market-price.max-markup-rate:5.00}") BigDecimal fallbackMaxMarkupRate) {
         this.jdbcTemplate = jdbcTemplate;
         this.deliveryJdbcTemplate = deliveryJdbcTemplate;
+        this.platformRuleService = platformRuleService;
+        this.fallbackMaxMarkupRate = fallbackMaxMarkupRate;
     }
 
     @Transactional("merchantTransactionManager")
@@ -80,7 +87,9 @@ public class CatalogService {
         long merchantId = merchantId(user);
         requireCategory(categoryId);
         try {
-            MarketPriceSettlementPolicy.calculate(1000, marketPricePerKg, merchantPricePerKg, BigDecimal.valueOf(5));
+            BigDecimal maxMarkupRate = platformRuleService.decimalOrDefault(
+                    "product.market.price.max.markup.rate", fallbackMaxMarkupRate);
+            MarketPriceSettlementPolicy.calculate(1000, marketPricePerKg, merchantPricePerKg, maxMarkupRate);
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(BAD_REQUEST, exception.getMessage());
         }

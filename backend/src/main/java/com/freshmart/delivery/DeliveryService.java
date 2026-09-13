@@ -1,11 +1,13 @@
 package com.freshmart.delivery;
 
 import com.freshmart.auth.CurrentUser;
+import com.freshmart.platform.PlatformRuleService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,9 +18,15 @@ import static org.springframework.http.HttpStatus.CONFLICT;
 @Service
 public class DeliveryService {
     private final JdbcTemplate jdbcTemplate;
+    private final PlatformRuleService platformRuleService;
+    private final int defaultAcceptTimeoutMinutes;
 
-    public DeliveryService(@Qualifier("deliveryJdbcTemplate") JdbcTemplate jdbcTemplate) {
+    public DeliveryService(@Qualifier("deliveryJdbcTemplate") JdbcTemplate jdbcTemplate,
+            PlatformRuleService platformRuleService,
+            @Value("${commerce.delivery.accept-timeout-minutes:5}") int defaultAcceptTimeoutMinutes) {
         this.jdbcTemplate = jdbcTemplate;
+        this.platformRuleService = platformRuleService;
+        this.defaultAcceptTimeoutMinutes = defaultAcceptTimeoutMinutes;
     }
 
     @Transactional("deliveryTransactionManager")
@@ -56,7 +64,12 @@ public class DeliveryService {
     }
 
     @Transactional("deliveryTransactionManager")
-    public void assign(long taskId, long riderUserId, int acceptTimeoutMinutes) {
+    public void assign(long taskId, long riderUserId) {
+        int acceptTimeoutMinutes = platformRuleService.integerOrDefault("delivery.accept.timeout.minutes",
+                defaultAcceptTimeoutMinutes);
+        if (acceptTimeoutMinutes <= 0) {
+            throw new ResponseStatusException(CONFLICT, "delivery accept timeout must be positive");
+        }
         List<Long> zones = jdbcTemplate.query("""
                 SELECT task.delivery_zone_id FROM delivery_tasks task
                 JOIN rider_profiles rider ON rider.user_id = ? AND rider.status = 'ACTIVE'

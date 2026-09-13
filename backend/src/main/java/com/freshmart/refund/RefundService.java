@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freshmart.auth.CurrentUser;
 import com.freshmart.platform.PlatformRuleService;
+import com.freshmart.media.MediaStorageService;
 import com.freshmart.payment.PaymentAdapterFactory;
 import com.freshmart.payment.FinancialStatusLogService;
 import java.math.BigDecimal;
@@ -15,6 +16,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -30,13 +33,17 @@ public class RefundService {
     private final int windowMinutes;
     private final PaymentAdapterFactory paymentAdapterFactory;
     private final FinancialStatusLogService statusLogService;
+    private final MediaStorageService mediaStorageService;
+    private final TransactionTemplate userTransactionTemplate;
 
     public RefundService(@Qualifier("tradeJdbcTemplate") JdbcTemplate tradeJdbcTemplate,
             @Qualifier("deliveryJdbcTemplate") JdbcTemplate deliveryJdbcTemplate,
             @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate, ObjectMapper objectMapper,
             PlatformRuleService platformRuleService,
             @Value("${commerce.refund.default-window-minutes:1440}") int windowMinutes,
-            PaymentAdapterFactory paymentAdapterFactory, FinancialStatusLogService statusLogService) {
+            PaymentAdapterFactory paymentAdapterFactory, FinancialStatusLogService statusLogService,
+            MediaStorageService mediaStorageService,
+            @Qualifier("userTransactionManager") PlatformTransactionManager userTransactionManager) {
         this.tradeJdbcTemplate = tradeJdbcTemplate;
         this.deliveryJdbcTemplate = deliveryJdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
@@ -45,6 +52,8 @@ public class RefundService {
         this.windowMinutes = windowMinutes;
         this.paymentAdapterFactory = paymentAdapterFactory;
         this.statusLogService = statusLogService;
+        this.mediaStorageService = mediaStorageService;
+        this.userTransactionTemplate = new TransactionTemplate(userTransactionManager);
     }
 
     @Transactional("tradeTransactionManager")
@@ -60,6 +69,12 @@ public class RefundService {
         if (description == null || description.isBlank() || images == null || images.isEmpty()
                 || images.stream().anyMatch(image -> image == null || image.isBlank())) {
             throw new ResponseStatusException(BAD_REQUEST, "refund evidence image and description are required");
+        }
+        for (String image : images) {
+            MediaStorageService.MediaAssetView evidence = mediaStorageService.describeOwned(user, image);
+            if (!evidence.contentType().startsWith("image/")) {
+                throw new ResponseStatusException(BAD_REQUEST, "refund evidence must be an image");
+            }
         }
         OrderPayment order = tradeJdbcTemplate.query("""
                 SELECT orders.id, orders.payable_amount, orders.user_id, payment.id AS payment_id
@@ -149,6 +164,33 @@ public class RefundService {
         return findRefund(refundNo).toView("MANUAL_PROCESS");
     }
 
+    @Transactional("tradeTransactionManager")
+    public InventoryDispositionView processInventoryDisposition(CurrentUser operator, String refundNo, String disposition, String note) {
+        if (!List.of("RESTOCKED", "DISCARDED").contains(disposition)) {
+            throw new ResponseStatusException(BAD_REQUEST, "disposition must be RESTOCKED or DISCARDED");
+        }
+        RefundDetail refund = findRefund(refundNo);
+        InventoryDisposition current = tradeJdbcTemplate.query("SELECT id, order_id, disposition, reason FROM refund_inventory_dispositions WHERE refund_id = ? FOR UPDATE",
+                (rs, row) -> new InventoryDisposition(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4)), refund.id()).stream().findFirst()
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "inventory disposition not found"));
+        if (!"PENDING_INSPECTION".equals(current.disposition())) {
+            throw new ResponseStatusException(CONFLICT, "inventory disposition has already been processed");
+        }
+        if ("RESTOCKED".equals(disposition)) {
+            List<BatchQuantity> batches = tradeJdbcTemplate.query("SELECT allocation.batch_id, allocation.warehouse_id, SUM(allocation.allocated_grams) FROM order_item_batch_allocations allocation JOIN order_items item ON item.id = allocation.order_item_id WHERE item.order_id = ? GROUP BY allocation.batch_id, allocation.warehouse_id",
+                    (rs, row) -> new BatchQuantity(rs.getLong(1), rs.getLong(2), rs.getInt(3)), refund.orderId());
+            for (BatchQuantity batch : batches) {
+                if (tradeJdbcTemplate.update("UPDATE freshmart_merchant.inventory_batches SET available_grams = available_grams + ? WHERE id = ? AND warehouse_id = ?", batch.grams(), batch.batchId(), batch.warehouseId()) == 0) {
+                    throw new ResponseStatusException(CONFLICT, "inventory batch no longer exists");
+                }
+            }
+        }
+        String cleanNote = note == null ? null : note.trim();
+        tradeJdbcTemplate.update("UPDATE refund_inventory_dispositions SET disposition = ?, processed_by = ?, processed_at = CURRENT_TIMESTAMP, processing_note = ? WHERE id = ? AND disposition = 'PENDING_INSPECTION'", disposition, operator.userId(), cleanNote, current.id());
+        statusLogService.record("REFUND_INVENTORY", refundNo, "PENDING_INSPECTION", disposition, "REFUND_INVENTORY_DISPOSITION_PROCESSED", operator.userId(), cleanNote, "MANUAL");
+        return new InventoryDispositionView(refundNo, refund.orderId(), disposition, current.reason(), operator.userId(), LocalDateTime.now(), cleanNote);
+    }
+
     private void completeRefund(RefundDetail refund, String reviewNote, long operatorId) {
         Integer existingLedger = tradeJdbcTemplate.queryForObject("SELECT COUNT(*) FROM fee_ledgers WHERE idempotency_key = ?", Integer.class, "REFUND-" + refund.refundNo());
         if (existingLedger != null && existingLedger > 0) {
@@ -234,6 +276,36 @@ public class RefundService {
                 """, refund.id(), refund.orderId(), refund.issueType() + "_DELIVERED_REFUND");
     }
 
+    private void rollbackPoints(RefundDetail refund) {
+        userTransactionTemplate.executeWithoutResult(status -> {
+            Integer awarded = userJdbcTemplate.query("""
+                    SELECT change_amount FROM points_transactions
+                    WHERE user_id = ? AND trade_id = ? AND reason = 'TRADE_PAYMENT'
+                    """, (rs, row) -> rs.getInt(1), refund.userId(), refund.tradeId()).stream().findFirst().orElse(0);
+            String idempotencyKey = "POINTS-REFUND-" + refund.refundNo();
+            userJdbcTemplate.update("INSERT IGNORE INTO user_point_accounts (user_id) VALUES (?)", refund.userId());
+            Integer available = userJdbcTemplate.queryForObject(
+                    "SELECT available_points FROM user_point_accounts WHERE user_id = ? FOR UPDATE", Integer.class, refund.userId());
+            Integer existing = userJdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM points_transactions WHERE idempotency_key = ?", Integer.class, idempotencyKey);
+            if (existing != null && existing > 0) {
+                return;
+            }
+            int actualRollback = com.freshmart.marketing.PointsCalculator.refundRollback(awarded, refund.amount(),
+                    refund.tradePayableAmount(), Math.max(0, available == null ? 0 : available));
+            if (actualRollback <= 0) {
+                return;
+            }
+            int balanceAfter = available - actualRollback;
+            userJdbcTemplate.update("UPDATE user_point_accounts SET available_points = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                    balanceAfter, refund.userId());
+            userJdbcTemplate.update("""
+                    INSERT INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
+                    VALUES (?, ?, ?, ?, 'REFUND_ROLLBACK', ?)
+                    """, refund.userId(), refund.tradeId(), -actualRollback, balanceAfter, idempotencyKey);
+        });
+    }
+
     private void refundWallet(RefundDetail refund) {
         userJdbcTemplate.update("UPDATE wallet_accounts SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
                 refund.amount(), refund.userId());
@@ -243,25 +315,6 @@ public class RefundService {
                 INSERT INTO wallet_transactions (wallet_id, trade_id, transaction_type, amount, balance_after, idempotency_key)
                 SELECT id, ?, 'REFUND', ?, ?, ? FROM wallet_accounts WHERE user_id = ?
                 """, refund.tradeId(), refund.amount(), balance, "WALLET-REFUND-" + refund.refundNo(), refund.userId());
-    }
-
-    private void rollbackPoints(RefundDetail refund) {
-        Integer awarded = userJdbcTemplate.query("""
-                SELECT change_amount FROM points_transactions
-                WHERE user_id = ? AND trade_id = ? AND reason = 'TRADE_PAYMENT'
-                """, (rs, row) -> rs.getInt(1), refund.userId(), refund.tradeId()).stream().findFirst().orElse(0);
-        int rollback = refund.tradePayableAmount().signum() == 0 ? 0
-                : refund.amount().multiply(BigDecimal.valueOf(awarded)).divide(refund.tradePayableAmount(), 0, java.math.RoundingMode.DOWN).intValueExact();
-        if (rollback == 0) {
-            return;
-        }
-        Integer balance = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                (rs, row) -> rs.getInt(1), refund.userId()).stream().findFirst().orElse(0);
-        userJdbcTemplate.update("""
-                INSERT IGNORE INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
-                VALUES (?, ?, ?, ?, 'REFUND_ROLLBACK', ?)
-                """, refund.userId(), refund.tradeId(), -rollback, Math.max(0, balance - rollback),
-                "POINTS-REFUND-" + refund.refundNo());
     }
 
     private RefundView findByIdempotencyKey(long userId, String key) {
@@ -288,6 +341,9 @@ public class RefundService {
     private record OrderPayment(long id, BigDecimal amount, long userId, long paymentId) {
     }
 
+    private record BatchQuantity(long batchId, long warehouseId, int grams) { }
+    private record InventoryDisposition(long id, long orderId, String disposition, String reason) { }
+
     private record RefundDetail(long id, String refundNo, long orderId, String issueType, BigDecimal amount, String status,
             String provider, long tradeId, long userId, BigDecimal tradePayableAmount, LocalDateTime deliveredAt, long paymentId) {
         private RefundView toView(String targetStatus) {
@@ -301,4 +357,7 @@ public class RefundService {
     public record RefundView(long id, String refundNo, long orderId, String issueType, BigDecimal amount,
             String status, LocalDateTime deliveredAt) {
     }
+
+    public record InventoryDispositionView(String refundNo, long orderId, String disposition, String reason,
+            long processedBy, LocalDateTime processedAt, String processingNote) { }
 }

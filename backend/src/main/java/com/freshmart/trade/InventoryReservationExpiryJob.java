@@ -7,19 +7,24 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 public class InventoryReservationExpiryJob {
     private final JdbcTemplate jdbcTemplate;
     private final JdbcTemplate userJdbcTemplate;
     private final FinancialStatusLogService statusLogService;
+    private final TransactionTemplate userTransactionTemplate;
 
     public InventoryReservationExpiryJob(@Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
             @Qualifier("userJdbcTemplate") JdbcTemplate userJdbcTemplate,
+            @Qualifier("userTransactionManager") PlatformTransactionManager userTransactionManager,
             FinancialStatusLogService statusLogService) {
         this.jdbcTemplate = jdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
         this.statusLogService = statusLogService;
+        this.userTransactionTemplate = new TransactionTemplate(userTransactionManager);
     }
 
     @Scheduled(fixedDelayString = "${commerce.inventory-release-interval-ms:60000}")
@@ -60,6 +65,7 @@ public class InventoryReservationExpiryJob {
                         """, tradeId);
             }
         }
+        releaseCancelledTradeRedemptions();
         List<FlashReservation> expiredFlash = jdbcTemplate.query("""
                 SELECT id, flash_sale_id, reserved_grams FROM flash_sale_reservations
                 WHERE status = 'ACTIVE' AND expires_at <= CURRENT_TIMESTAMP FOR UPDATE
@@ -76,10 +82,43 @@ public class InventoryReservationExpiryJob {
         }
     }
 
+    private void releaseCancelledTradeRedemptions() {
+        List<CancelledTrade> cancelledTrades = jdbcTemplate.query("""
+                SELECT id, user_id, redeemed_points
+                FROM trade_orders
+                WHERE status = 'CANCELLED' AND user_id IS NOT NULL AND redeemed_points > 0
+                """, (rs, row) -> new CancelledTrade(rs.getLong("id"), rs.getLong("user_id"),
+                rs.getInt("redeemed_points")));
+        for (CancelledTrade trade : cancelledTrades) {
+            userTransactionTemplate.executeWithoutResult(status -> releasePoints(trade));
+        }
+    }
+
+    private void releasePoints(CancelledTrade trade) {
+        String idempotencyKey = "POINTS-RELEASE-" + trade.tradeId();
+        userJdbcTemplate.update("INSERT IGNORE INTO user_point_accounts (user_id) VALUES (?)", trade.userId());
+        int inserted = userJdbcTemplate.update("""
+                INSERT IGNORE INTO points_transactions (user_id, trade_id, change_amount, balance_after, reason, idempotency_key)
+                VALUES (?, ?, ?, 0, 'REDEMPTION_RELEASED', ?)
+                """, trade.userId(), trade.tradeId(), trade.redeemedPoints(), idempotencyKey);
+        if (inserted == 0) {
+            return;
+        }
+        userJdbcTemplate.update("UPDATE user_point_accounts SET available_points = available_points + ? WHERE user_id = ?",
+                trade.redeemedPoints(), trade.userId());
+        Integer balance = userJdbcTemplate.queryForObject("SELECT available_points FROM user_point_accounts WHERE user_id = ?",
+                Integer.class, trade.userId());
+        userJdbcTemplate.update("UPDATE points_transactions SET balance_after = ? WHERE idempotency_key = ?", balance,
+                idempotencyKey);
+    }
+
     private record Reservation(long id, long tradeId, long productId, long batchId, int grams) {
     }
 
     private record PaymentState(String paymentNo, String status) {
+    }
+
+    private record CancelledTrade(long tradeId, long userId, int redeemedPoints) {
     }
 
     private record FlashReservation(long id, long flashSaleId, int grams) {

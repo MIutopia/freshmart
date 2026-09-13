@@ -106,6 +106,13 @@ CREATE TABLE IF NOT EXISTS freshmart_user.points_transactions (
   CONSTRAINT fk_points_user FOREIGN KEY (user_id) REFERENCES freshmart_user.users(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_user.user_point_accounts (
+  user_id BIGINT PRIMARY KEY,
+  available_points INT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT chk_point_account_nonnegative CHECK (available_points >= 0)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_user.user_coupons (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
@@ -117,6 +124,12 @@ CREATE TABLE IF NOT EXISTS freshmart_user.user_coupons (
   UNIQUE KEY uk_user_coupon (user_id, coupon_id),
   KEY idx_user_coupon_status (user_id, status),
   CONSTRAINT fk_user_coupon_user FOREIGN KEY (user_id) REFERENCES freshmart_user.users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_user.user_notification_preferences (
+  user_id BIGINT PRIMARY KEY,
+  seasonal_card_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_merchant.merchants (
@@ -358,6 +371,8 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.trade_orders (
   goods_amount DECIMAL(10,2) NOT NULL,
   freight_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  redeemed_points INT NOT NULL DEFAULT 0,
+  points_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   payable_amount DECIMAL(10,2) NOT NULL,
   reservation_expires_at DATETIME NOT NULL,
   idempotency_key VARCHAR(80) NOT NULL UNIQUE,
@@ -379,6 +394,8 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.orders (
   goods_amount DECIMAL(10,2) NOT NULL,
   freight_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  redeemed_points INT NOT NULL DEFAULT 0,
+  points_discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   payable_amount DECIMAL(10,2) NOT NULL,
   address_snapshot JSON NOT NULL,
   pricing_snapshot JSON NOT NULL,
@@ -504,6 +521,18 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
   KEY idx_payment_trade_status (trade_id, status)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS freshmart_log.media_assets (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  storage_key VARCHAR(64) NOT NULL UNIQUE,
+  storage_file_name VARCHAR(100) NOT NULL UNIQUE,
+  uploader_user_id BIGINT NOT NULL,
+  original_file_name VARCHAR(255) NOT NULL,
+  content_type VARCHAR(80) NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_media_uploader_created (uploader_user_id, created_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_verifications (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   payment_no VARCHAR(40) NOT NULL,
@@ -618,6 +647,8 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.merchant_settlements (
   net_amount DECIMAL(10,2) NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
   settled_at DATETIME NULL,
+  settled_by BIGINT NULL,
+  settlement_note VARCHAR(500) NULL,
   reversed_at DATETIME NULL,
   reversal_reason VARCHAR(80) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -631,6 +662,9 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.refund_inventory_dispositions (
   order_id BIGINT NOT NULL,
   disposition VARCHAR(32) NOT NULL,
   reason VARCHAR(120) NOT NULL,
+  processed_by BIGINT NULL,
+  processed_at DATETIME NULL,
+  processing_note VARCHAR(500) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_refund_inventory_order (order_id, created_at)
 ) ENGINE=InnoDB;
@@ -678,9 +712,58 @@ CREATE TABLE IF NOT EXISTS freshmart_log.inbox_messages (
   card_svg_content LONGTEXT NULL,
   business_type VARCHAR(32) NULL,
   business_id BIGINT NULL,
+  idempotency_key VARCHAR(100) NULL,
   read_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_inbox_user_read (user_id, read_at, created_at)
+  KEY idx_inbox_user_read (user_id, read_at, created_at),
+  UNIQUE KEY uk_inbox_idempotency (idempotency_key)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_log.ai_interaction_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  actor_user_id BIGINT NULL,
+  scenario VARCHAR(64) NOT NULL,
+  subject_reference VARCHAR(80) NULL,
+  model_name VARCHAR(120) NOT NULL,
+  request_sha256 CHAR(64) NOT NULL,
+  response_sha256 CHAR(64) NULL,
+  status VARCHAR(16) NOT NULL,
+  error_code VARCHAR(80) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_ai_interaction_actor_created (actor_user_id, created_at),
+  KEY idx_ai_interaction_scenario_created (scenario, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_log.holiday_card_tasks (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_key VARCHAR(64) NOT NULL,
+  holiday_key VARCHAR(32) NOT NULL,
+  greeting VARCHAR(120) NOT NULL,
+  scheduled_at DATETIME NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  created_by BIGINT NOT NULL,
+  started_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  sent_count INT NOT NULL DEFAULT 0,
+  failed_count INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_holiday_card_task_key (task_key),
+  KEY idx_holiday_card_task_due (status, scheduled_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS freshmart_log.holiday_card_deliveries (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+  attempts INT NOT NULL DEFAULT 0,
+  inbox_message_id BIGINT NULL,
+  last_error VARCHAR(500) NULL,
+  sent_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_holiday_card_delivery (task_id, user_id),
+  KEY idx_holiday_card_delivery_status (task_id, status)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_log.integration_outbox (
@@ -784,12 +867,6 @@ INSERT IGNORE INTO freshmart_delivery.rider_profiles (user_id, employee_no, stat
 SELECT id, CONCAT('TEST-RIDER-', RIGHT(login_name, 2)), 'ACTIVE'
 FROM freshmart_user.users
 WHERE login_name LIKE 'rider-test-%';
-
-ALTER TABLE freshmart_trade.payment_reconciliation_differences
-  ADD COLUMN IF NOT EXISTS claimed_by BIGINT NULL AFTER status,
-  ADD COLUMN IF NOT EXISTS claimed_at DATETIME NULL AFTER claimed_by,
-  ADD COLUMN IF NOT EXISTS resolution VARCHAR(24) NULL AFTER resolved_at,
-  ADD COLUMN IF NOT EXISTS resolution_note VARCHAR(500) NULL AFTER resolution;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.financial_status_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
