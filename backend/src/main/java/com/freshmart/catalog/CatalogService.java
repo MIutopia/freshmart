@@ -151,6 +151,16 @@ public class CatalogService {
                 """, (rs, row) -> productView(rs), merchantId);
     }
 
+    public List<WarehouseView> listWarehouses(CurrentUser user) {
+        long merchantId = merchantId(user);
+        return jdbcTemplate.query("""
+                SELECT id, merchant_id, delivery_zone_id, name, code, address, status
+                FROM warehouses WHERE merchant_id = ? ORDER BY id DESC
+                """, (rs, row) -> new WarehouseView(rs.getLong("id"), rs.getLong("merchant_id"),
+                        rs.getLong("delivery_zone_id"), rs.getString("name"), rs.getString("code"),
+                        rs.getString("address"), rs.getString("status")), merchantId);
+    }
+
     @Transactional("merchantTransactionManager")
     public long createBatch(CurrentUser user, long productId, long warehouseId, String batchNo, int availableGrams, LocalDate expiresOn) {
         if (availableGrams <= 0) {
@@ -218,5 +228,9 @@ public class CatalogService {
 
     public record ProductView(long id, long merchantId, long categoryId, String name, String description,
             BigDecimal marketPricePerKg, BigDecimal merchantPricePerKg, int availableGrams) {
+    }
+
+    public record WarehouseView(long id, long merchantId, long deliveryZoneId, String name, String code,
+            String address, String status) {
     }
 }

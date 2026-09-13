@@ -165,6 +165,37 @@ public class RefundService {
     }
 
     @Transactional("tradeTransactionManager")
+    public List<RefundView> listMine(CurrentUser user) {
+        return tradeJdbcTemplate.query("""
+                SELECT refund.id, refund.refund_no, refund.order_id, refund.issue_type, refund.amount, refund.status,
+                       delivery.delivered_at
+                FROM refund_orders refund
+                JOIN orders ON orders.id = refund.order_id
+                LEFT JOIN freshmart_delivery.delivery_tasks delivery
+                       ON delivery.order_id = refund.order_id AND delivery.status = 'DELIVERED'
+                WHERE orders.user_id = ?
+                ORDER BY refund.id DESC LIMIT 100
+                """, (rs, row) -> refundView(rs), user.userId());
+    }
+
+    public List<RefundView> listAll(String status) {
+        return tradeJdbcTemplate.query("""
+                SELECT refund.id, refund.refund_no, refund.order_id, refund.issue_type, refund.amount, refund.status,
+                       delivery.delivered_at
+                FROM refund_orders refund
+                LEFT JOIN freshmart_delivery.delivery_tasks delivery
+                       ON delivery.order_id = refund.order_id AND delivery.status = 'DELIVERED'
+                WHERE (? IS NULL OR refund.status = ?)
+                ORDER BY refund.id DESC LIMIT 200
+                """, (rs, row) -> refundView(rs), status, status);
+    }
+
+    private RefundView refundView(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new RefundView(rs.getLong("id"), rs.getString("refund_no"), rs.getLong("order_id"),
+                rs.getString("issue_type"), rs.getBigDecimal("amount"), rs.getString("status"),
+                rs.getObject("delivered_at", LocalDateTime.class));
+    }
+
     public InventoryDispositionView processInventoryDisposition(CurrentUser operator, String refundNo, String disposition, String note) {
         if (!List.of("RESTOCKED", "DISCARDED").contains(disposition)) {
             throw new ResponseStatusException(BAD_REQUEST, "disposition must be RESTOCKED or DISCARDED");

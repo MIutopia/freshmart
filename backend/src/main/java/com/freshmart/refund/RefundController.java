@@ -9,13 +9,15 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PutMapping;
 
 @RestController
 public class RefundController {
@@ -35,6 +37,18 @@ public class RefundController {
             @Valid @RequestBody RefundRequest request) {
         return refundService.apply(user, request.orderId(), request.issueType(), request.description(),
                 request.evidenceImages(), idempotencyKey);
+    }
+
+    @GetMapping("/api/refunds")
+    @PreAuthorize("hasRole('CONSUMER')")
+    public List<RefundService.RefundView> listMine(@AuthenticationPrincipal CurrentUser user) {
+        return refundService.listMine(user);
+    }
+
+    @GetMapping("/api/admin/refunds")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATIONS','FINANCE')")
+    public List<RefundService.RefundView> listAll(@RequestParam(required = false) String status) {
+        return refundService.listAll(status);
     }
 
     @PutMapping("/api/admin/refunds/{refundId}/review")

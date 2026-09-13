@@ -65,10 +65,11 @@ public class MerchantDashboardService {
                 GROUP BY item.product_id, item.product_name_snapshot ORDER BY sold_grams DESC, item.product_id LIMIT 10
                 """, (rs, row) -> new TopProductView(rs.getLong("product_id"), rs.getString("product_name_snapshot"),
                 rs.getInt("sold_grams"), rs.getBigDecimal("sales_amount")), merchantId, from, to);
+        // orders 与 delivery_tasks 都有 status 列，必须显式限定为 task.status
         DeliverySummary delivery = deliveryJdbcTemplate.query("""
-                SELECT COUNT(*) task_count, COALESCE(SUM(status = 'DELIVERED'), 0) delivered_count,
-                       COALESCE(SUM(status = 'WAITING_ASSIGNMENT'), 0) waiting_assignment_count,
-                       COALESCE(SUM(status IN ('ASSIGNED', 'ACCEPTED', 'PICKED')), 0) in_progress_count
+                SELECT COUNT(*) task_count, COALESCE(SUM(task.status = 'DELIVERED'), 0) delivered_count,
+                       COALESCE(SUM(task.status = 'WAITING_ASSIGNMENT'), 0) waiting_assignment_count,
+                       COALESCE(SUM(task.status IN ('ASSIGNED', 'ACCEPTED', 'PICKED')), 0) in_progress_count
                 FROM delivery_tasks task JOIN freshmart_trade.orders orders ON orders.id = task.order_id
                 WHERE task.merchant_id = ? AND DATE(orders.created_at) >= ? AND DATE(orders.created_at) <= ?
                 """, (rs, row) -> new DeliverySummary(rs.getInt("task_count"), rs.getInt("delivered_count"),

@@ -92,6 +92,12 @@ public class CatalogController {
         return catalogService.listMerchantProducts(user);
     }
 
+    @GetMapping("/api/merchant/warehouses")
+    @PreAuthorize("hasRole('MERCHANT')")
+    public List<CatalogService.WarehouseView> listWarehouses(@AuthenticationPrincipal CurrentUser user) {
+        return catalogService.listWarehouses(user);
+    }
+
     public record IdResponse(long id) { }
     public record CategoryRequest(Long parentId, @NotBlank String name, @PositiveOrZero int sortOrder) { }
     public record WarehouseRequest(@Positive long deliveryZoneId, @NotBlank String name, @NotBlank String code, @NotBlank String address) { }
