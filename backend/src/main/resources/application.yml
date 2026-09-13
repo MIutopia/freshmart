@@ -72,8 +72,9 @@ commerce:
   weighing:
     platform-absorb-limit: ${WEIGHING_ABSORB_LIMIT:1.50}
   payment:
-    provider: ${PAYMENT_PROVIDER:SIMULATED}
-    mode: ${PAYMENT_MODE:SIMULATED}
+    provider: PERSONAL_WECHAT_QR
+    mode: MANUAL_CONFIRMATION
+    personal-wechat-qr-url: ${PERSONAL_WECHAT_QR_URL:}
   notification:
     seasonal-card-channel: INBOX
   authentication:

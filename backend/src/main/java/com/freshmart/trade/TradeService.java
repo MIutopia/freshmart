@@ -42,6 +42,7 @@ public class TradeService {
     private final BigDecimal standardFreight;
     private final BigDecimal maxMarkupRate;
     private final BigDecimal pointsPerCurrency;
+    private final String personalWechatQrUrl;
 
     public TradeService(
             @Qualifier("tradeJdbcTemplate") JdbcTemplate jdbcTemplate,
@@ -53,7 +54,8 @@ public class TradeService {
             @Value("${commerce.freight.free-threshold:59.00}") BigDecimal freeFreightThreshold,
             @Value("${commerce.freight.standard-fee:6.00}") BigDecimal standardFreight,
             @Value("${commerce.market-price.max-markup-rate:5.00}") BigDecimal maxMarkupRate,
-            @Value("${commerce.points-per-currency:1.00}") BigDecimal pointsPerCurrency) {
+            @Value("${commerce.points-per-currency:1.00}") BigDecimal pointsPerCurrency,
+            @Value("${commerce.payment.personal-wechat-qr-url:}") String personalWechatQrUrl) {
         this.jdbcTemplate = jdbcTemplate;
         this.userJdbcTemplate = userJdbcTemplate;
         this.merchantJdbcTemplate = merchantJdbcTemplate;
@@ -64,6 +66,7 @@ public class TradeService {
         this.standardFreight = standardFreight;
         this.maxMarkupRate = maxMarkupRate;
         this.pointsPerCurrency = pointsPerCurrency;
+        this.personalWechatQrUrl = personalWechatQrUrl;
     }
 
     @Transactional("tradeTransactionManager")
@@ -222,17 +225,41 @@ public class TradeService {
         if (!existing.isEmpty()) {
             return existing.get(0);
         }
+        if (personalWechatQrUrl == null || personalWechatQrUrl.isBlank()) {
+            throw new ResponseStatusException(CONFLICT, "personal WeChat QR code is not configured for local testing");
+        }
         String paymentNo = newNo("P");
-        String codeUrl = "SIMULATED://freshmart/pay/" + paymentNo;
+        String codeUrl = personalWechatQrUrl.trim();
         jdbcTemplate.update("""
                 INSERT INTO payment_orders (payment_no, trade_id, provider, payment_mode, code_url, amount, idempotency_key)
-                VALUES (?, ?, 'SIMULATED', 'NATIVE', ?, ?, ?)
+                VALUES (?, ?, 'PERSONAL_WECHAT_QR', 'MANUAL_CONFIRMATION', ?, ?, ?)
                 """, paymentNo, trade.id(), codeUrl, trade.payableAmount(), "PREPAY-" + trade.tradeNo());
         return new PaymentView(paymentNo, "PENDING", trade.payableAmount(), codeUrl);
     }
 
+    public PaymentView paymentCode(CurrentUser user, String tradeNo) {
+        TradeView trade = requireOwnedPendingTrade(user, tradeNo);
+        return jdbcTemplate.query("""
+                SELECT payment_no, status, amount, code_url FROM payment_orders
+                WHERE trade_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1
+                """, (rs, row) -> new PaymentView(rs.getString("payment_no"), rs.getString("status"),
+                rs.getBigDecimal("amount"), rs.getString("code_url")), trade.id()).stream().findFirst()
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "pending personal WeChat QR payment not found"));
+    }
+
     @Transactional("tradeTransactionManager")
-    public TradeView confirmSimulatedPayment(CurrentUser user, String tradeNo) {
+    public TradeView confirmPersonalWechatQrPayment(CurrentUser admin, String tradeNo) {
+        TradeView trade = findByTradeNo(tradeNo);
+        if (trade == null) {
+            throw new ResponseStatusException(NOT_FOUND, "trade not found");
+        }
+        if (!"PENDING_PAYMENT".equals(trade.status())) {
+            throw new ResponseStatusException(CONFLICT, "trade is not awaiting payment");
+        }
+        return settlePaidTrade(trade);
+    }
+
+    private TradeView confirmSimulatedPayment(CurrentUser user, String tradeNo) {
         return settlePaidTrade(user, tradeNo);
     }
 
@@ -269,7 +296,10 @@ public class TradeService {
     }
 
     private TradeView settlePaidTrade(CurrentUser user, String tradeNo) {
-        TradeView trade = requireOwnedPendingTrade(user, tradeNo);
+        return settlePaidTrade(requireOwnedPendingTrade(user, tradeNo));
+    }
+
+    private TradeView settlePaidTrade(TradeView trade) {
         if (trade.reservationExpiresAt().isBefore(LocalDateTime.now())) {
             throw new ResponseStatusException(CONFLICT, "inventory reservation has expired");
         }

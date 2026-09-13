@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -45,10 +46,17 @@ public class TradeController {
         return tradeService.prepay(user, tradeNo);
     }
 
-    @PostMapping("/api/payments/{tradeNo}/confirm-simulated")
+    @GetMapping("/api/trades/{tradeNo}/payment-code")
     @PreAuthorize("hasRole('CONSUMER')")
-    public TradeService.TradeView confirmSimulatedPayment(@AuthenticationPrincipal CurrentUser user, @PathVariable String tradeNo) {
-        return tradeService.confirmSimulatedPayment(user, tradeNo);
+    public TradeService.PaymentView paymentCode(@AuthenticationPrincipal CurrentUser user, @PathVariable String tradeNo) {
+        return tradeService.paymentCode(user, tradeNo);
+    }
+
+    @PostMapping("/api/admin/payments/{tradeNo}/confirm-personal-wechat-qr")
+    @PreAuthorize("hasRole('ADMIN')")
+    public TradeService.TradeView confirmPersonalWechatQrPayment(@AuthenticationPrincipal CurrentUser admin,
+            @PathVariable String tradeNo) {
+        return tradeService.confirmPersonalWechatQrPayment(admin, tradeNo);
     }
 
     @PostMapping("/api/payments/{tradeNo}/confirm-balance")
