@@ -505,77 +505,56 @@ CREATE TABLE IF NOT EXISTS freshmart_trade.payment_orders (
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_verifications (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  payment_id BIGINT NOT NULL,
-  verification_type VARCHAR(24) NOT NULL,
-  submitted_by BIGINT NULL,
-  amount DECIMAL(10,2) NULL,
-  remark_text VARCHAR(120) NULL,
+  payment_no VARCHAR(40) NOT NULL,
+  verification_type VARCHAR(32) NOT NULL,
   proof_url VARCHAR(512) NULL,
-  status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
-  failure_code VARCHAR(48) NULL,
+  bill_transaction_id VARCHAR(128) NULL,
+  bill_amount DECIMAL(10,2) NULL,
+  remark_text VARCHAR(120) NULL,
+  result VARCHAR(24) NOT NULL DEFAULT 'PENDING',
   failure_message VARCHAR(300) NULL,
+  verified_by BIGINT NULL,
   verified_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_payment_verification_status (payment_id, status, created_at),
-  CONSTRAINT fk_payment_verification_payment
-    FOREIGN KEY (payment_id) REFERENCES freshmart_trade.payment_orders(id)
+  KEY idx_payment_verification_payment (payment_no, created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_bill_imports (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  import_no VARCHAR(40) NOT NULL UNIQUE,
-  file_name VARCHAR(255) NULL,
-  imported_by BIGINT NULL,
-  status VARCHAR(24) NOT NULL DEFAULT 'PROCESSING',
+  file_name VARCHAR(255) NOT NULL,
+  imported_by BIGINT NOT NULL,
+  imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   total_entries INT NOT NULL DEFAULT 0,
   matched_entries INT NOT NULL DEFAULT 0,
-  difference_entries INT NOT NULL DEFAULT 0,
-  imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at DATETIME NULL,
-  KEY idx_bill_import_status (status, imported_at)
+  difference_entries INT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_bill_entries (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   import_id BIGINT NOT NULL,
-  provider_transaction_id VARCHAR(64) NULL,
+  transaction_id VARCHAR(128) NOT NULL,
   transaction_time DATETIME NULL,
-  remark_text VARCHAR(255) NULL,
+  remark_text VARCHAR(300) NULL,
   amount DECIMAL(10,2) NOT NULL,
-  direction VARCHAR(8) NOT NULL,
-  matched_payment_id BIGINT NULL,
-  match_status VARCHAR(24) NOT NULL DEFAULT 'UNMATCHED',
-  mismatch_reason VARCHAR(300) NULL,
+  direction VARCHAR(16) NOT NULL,
+  payment_no VARCHAR(40) NULL,
+  match_result VARCHAR(24) NOT NULL DEFAULT 'UNMATCHED',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_bill_entry_import (import_id, match_status),
-  KEY idx_bill_entry_payment (matched_payment_id),
-  CONSTRAINT fk_bill_entry_import
-    FOREIGN KEY (import_id) REFERENCES freshmart_trade.payment_bill_imports(id),
-  CONSTRAINT fk_bill_entry_payment
-    FOREIGN KEY (matched_payment_id) REFERENCES freshmart_trade.payment_orders(id)
+  CONSTRAINT fk_bill_entry_import FOREIGN KEY (import_id) REFERENCES freshmart_trade.payment_bill_imports(id),
+  KEY idx_bill_entry_match (match_result, created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.payment_reconciliation_differences (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  import_id BIGINT NOT NULL,
-  entry_id BIGINT NULL,
-  payment_id BIGINT NULL,
+  payment_no VARCHAR(40) NULL,
+  bill_entry_id BIGINT NULL,
   difference_type VARCHAR(32) NOT NULL,
-  expected_amount DECIMAL(10,2) NULL,
-  actual_amount DECIMAL(10,2) NULL,
-  detail VARCHAR(500) NOT NULL,
+  description VARCHAR(500) NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'OPEN',
   resolved_by BIGINT NULL,
   resolved_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_reconciliation_import (import_id, status, created_at),
-  KEY idx_reconciliation_payment (payment_id),
-  CONSTRAINT fk_reconciliation_import
-    FOREIGN KEY (import_id) REFERENCES freshmart_trade.payment_bill_imports(id),
-  CONSTRAINT fk_reconciliation_entry
-    FOREIGN KEY (entry_id) REFERENCES freshmart_trade.payment_bill_entries(id),
-  CONSTRAINT fk_reconciliation_payment
-    FOREIGN KEY (payment_id) REFERENCES freshmart_trade.payment_orders(id)
+  KEY idx_reconciliation_status (status, created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS freshmart_trade.refund_orders (
