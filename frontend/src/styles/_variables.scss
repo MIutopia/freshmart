@@ -1,0 +1,59 @@
+// 全站视觉变量与常用混入；页面统一 @use '../../styles/variables' as * 引入
+$mint: #3fbf9a;
+$mint-deep: #2f9f80;
+$mint-soft: #e9f7f2;
+
+$surface: #ffffff;
+$canvas: #f7faf9;
+$border: #edf2f0;
+
+$text-primary: #1f2d2b;
+$text-secondary: #6b807b;
+$text-muted: #93a5a1;
+
+$danger: #c9463a;
+$warning: #b8860b;
+
+$radius-lg: 14px;
+$radius-md: 10px;
+$radius-sm: 6px;
+
+// 悬浮卡片：轻微上浮 + 柔和阴影，过渡曲线无明显回弹
+@mixin card-hover {
+  transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), border-color 0.28s ease;
+  will-change: transform;
+
+  &:hover {
+    transform: translateY(-3px);
+    border-color: rgba($mint, 0.35);
+    box-shadow: 0 10px 24px rgba(31, 45, 43, 0.08), 0 2px 6px rgba(31, 45, 43, 0.04);
+  }
+}
+
+@mixin panel {
+  background: $surface;
+  border: 1px solid $border;
+  border-radius: $radius-lg;
+}
+
+// 页面通用外壳：标题层级 + 留白节奏
+@mixin page-shell {
+  .page-head {
+    margin-bottom: 18px;
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+      color: $text-primary;
+    }
+
+    .sub {
+      display: block;
+      margin-top: 8px;
+      font-size: 13px;
+      color: $text-secondary;
+    }
+  }
+}
