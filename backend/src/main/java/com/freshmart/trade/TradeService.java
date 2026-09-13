@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freshmart.auth.CurrentUser;
 import com.freshmart.order.FreightCalculator;
 import com.freshmart.order.MarketPriceSettlementPolicy;
+import com.freshmart.marketing.BatchPromotionPolicy;
 import com.freshmart.marketing.PromotionCalculator;
 import com.freshmart.platform.PlatformRuleService;
 import java.math.BigDecimal;
@@ -110,42 +111,21 @@ public class TradeService {
                     .add(new PricedLine(product, requestedLine.weightGrams(), price));
         }
 
-        Map<Long, List<PromotionCalculator.Promotion>> merchantPromotions = loadPromotions(user.userId(), couponIds, merchantLines.keySet());
-        int points = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                (rs, row) -> rs.getInt(1), user.userId()).stream().findFirst().orElse(0);
-        Map<Long, PromotionCalculator.DiscountResult> merchantDiscounts = new HashMap<>();
+        Map<Long, BigDecimal> batchDiscounts = new HashMap<>();
+        Map<Long, Long> orderIds = new HashMap<>();
         BigDecimal goodsAmount = BigDecimal.ZERO;
-        BigDecimal discountAmount = BigDecimal.ZERO;
         for (Map.Entry<Long, List<PricedLine>> entry : merchantLines.entrySet()) {
             BigDecimal merchantGoods = entry.getValue().stream().map(line -> line.price().userGoodsAmount())
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal membershipRate = merchantJdbcTemplate.query("""
-                    SELECT discount_rate FROM membership_levels WHERE status = 'ACTIVE' AND min_points <= ?
-                    ORDER BY min_points DESC LIMIT 1
-                    """, (rs, row) -> rs.getBigDecimal(1), points).stream().findFirst().orElse(BigDecimal.valueOf(100));
-            PromotionCalculator.DiscountResult discount = PromotionCalculator.calculate(merchantGoods, membershipRate,
-                    merchantPromotions.getOrDefault(entry.getKey(), List.of()));
-            boolean containsIneligibleCoupon = merchantPromotions.getOrDefault(entry.getKey(), List.of()).stream()
-                    .anyMatch(promotion -> merchantGoods.compareTo(promotion.thresholdAmount()) < 0);
-            if (containsIneligibleCoupon) {
-                throw new ResponseStatusException(CONFLICT, "coupon threshold is not met");
-            }
-            merchantDiscounts.put(entry.getKey(), discount);
             goodsAmount = goodsAmount.add(merchantGoods);
-            discountAmount = discountAmount.add(discount.discountAmount());
-        }
-        BigDecimal freightAmount = BigDecimal.ZERO;
-        for (Long merchantId : merchantLines.keySet()) {
-            freightAmount = freightAmount.add(FreightCalculator.calculate(merchantDiscounts.get(merchantId).payableGoodsAmount(),
-                    freeFreightThreshold, standardFreight));
         }
         String tradeNo = newNo("T");
         jdbcTemplate.update("""
                 INSERT INTO trade_orders (trade_no, user_id, goods_amount, freight_amount, discount_amount, payable_amount,
                                           reservation_expires_at, idempotency_key)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, tradeNo, user.userId(), goodsAmount, freightAmount, discountAmount,
-                goodsAmount.subtract(discountAmount).add(freightAmount), expiresAt, idempotencyKey);
+                """, tradeNo, user.userId(), goodsAmount, BigDecimal.ZERO, BigDecimal.ZERO,
+                goodsAmount, expiresAt, idempotencyKey);
         long tradeId = lastInsertId();
         String addressJson = json(addressSnapshot);
         List<String> orderNos = new ArrayList<>();
@@ -154,17 +134,17 @@ public class TradeService {
             List<PricedLine> lines = entry.getValue();
             long warehouseId = merchantWarehouseIds.get(merchantId);
             BigDecimal merchantGoods = lines.stream().map(line -> line.price().userGoodsAmount()).reduce(BigDecimal.ZERO, BigDecimal::add);
-            PromotionCalculator.DiscountResult discount = merchantDiscounts.get(merchantId);
-            BigDecimal merchantFreight = FreightCalculator.calculate(discount.payableGoodsAmount(), freeFreightThreshold, standardFreight);
             String orderNo = newNo("O");
             jdbcTemplate.update("""
                     INSERT INTO orders (order_no, trade_id, user_id, merchant_id, warehouse_id, delivery_zone_id, goods_amount,
                                         freight_amount, discount_amount, payable_amount, address_snapshot, pricing_snapshot)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON))
                     """, orderNo, tradeId, user.userId(), merchantId, warehouseId, deliveryZoneId, merchantGoods,
-                    merchantFreight, discount.discountAmount(), discount.payableGoodsAmount().add(merchantFreight), addressJson,
-                    json(Map.of("priceSource", "MARKET_CAP", "promotionDiscount", discount.discountAmount())));
+                    BigDecimal.ZERO, BigDecimal.ZERO, merchantGoods, addressJson,
+                    json(Map.of("priceSource", "MARKET_CAP", "batchPromotionDiscount", BigDecimal.ZERO,
+                            "marketingDiscount", BigDecimal.ZERO)));
             long orderId = lastInsertId();
+            orderIds.put(merchantId, orderId);
             orderNos.add(orderNo);
             for (PricedLine line : lines) {
                 jdbcTemplate.update("""
@@ -176,14 +156,49 @@ public class TradeService {
                         line.product().marketPricePerKg(), line.product().merchantPricePerKg(), line.price().userPricePerKilogram(),
                         line.price().merchantGrossAmount(), line.price().userGoodsAmount(), line.price().platformSubsidyAmount());
                 long orderItemId = lastInsertId();
-                reserveBatches(tradeId, orderId, orderItemId, line.product().productId(), warehouseId, line.weightGrams(), expiresAt);
+                BigDecimal batchDiscount = reserveBatches(tradeId, orderId, orderItemId, line.product().productId(),
+                        warehouseId, line.weightGrams(), line.price().userPricePerKilogram(), expiresAt);
+                batchDiscounts.merge(merchantId, batchDiscount, BigDecimal::add);
+                jdbcTemplate.update("UPDATE order_items SET batch_promotion_discount_amount = ? WHERE id = ?",
+                        batchDiscount, orderItemId);
             }
         }
+        Map<Long, List<PromotionCalculator.Promotion>> merchantPromotions = loadPromotions(user.userId(), couponIds, merchantLines.keySet());
+        int points = userJdbcTemplate.query("SELECT balance_after FROM points_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (rs, row) -> rs.getInt(1), user.userId()).stream().findFirst().orElse(0);
+        BigDecimal finalDiscountAmount = BigDecimal.ZERO;
+        BigDecimal finalFreightAmount = BigDecimal.ZERO;
+        for (Map.Entry<Long, Long> entry : orderIds.entrySet()) {
+            long merchantId = entry.getKey();
+            BigDecimal merchantBatchDiscount = batchDiscounts.getOrDefault(merchantId, BigDecimal.ZERO);
+            BigDecimal merchantGoods = merchantLines.get(merchantId).stream().map(line -> line.price().userGoodsAmount())
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal promotionBase = merchantGoods.subtract(merchantBatchDiscount).max(BigDecimal.ZERO);
+            BigDecimal membershipRate = membershipRate(points);
+            PromotionCalculator.DiscountResult discount = PromotionCalculator.calculate(promotionBase, membershipRate,
+                    merchantPromotions.getOrDefault(merchantId, List.of()));
+            boolean containsIneligibleCoupon = merchantPromotions.getOrDefault(merchantId, List.of()).stream()
+                    .anyMatch(promotion -> promotionBase.compareTo(promotion.thresholdAmount()) < 0);
+            if (containsIneligibleCoupon) {
+                throw new ResponseStatusException(CONFLICT, "coupon threshold is not met after batch promotion");
+            }
+            BigDecimal payableGoods = discount.payableGoodsAmount();
+            BigDecimal merchantFreight = FreightCalculator.calculate(payableGoods, freeFreightThreshold, standardFreight);
+            BigDecimal merchantDiscount = merchantBatchDiscount.add(discount.discountAmount());
+            finalDiscountAmount = finalDiscountAmount.add(merchantDiscount);
+            finalFreightAmount = finalFreightAmount.add(merchantFreight);
+            jdbcTemplate.update("UPDATE orders SET discount_amount = ?, freight_amount = ?, payable_amount = ?, pricing_snapshot = CAST(? AS JSON) WHERE id = ?",
+                    merchantDiscount, merchantFreight, payableGoods.add(merchantFreight),
+                    json(Map.of("priceSource", "MARKET_CAP", "batchPromotionDiscount", merchantBatchDiscount,
+                            "marketingDiscount", discount.discountAmount())), entry.getValue());
+        }
+        jdbcTemplate.update("UPDATE trade_orders SET discount_amount = ?, freight_amount = ?, payable_amount = ? WHERE id = ?",
+                finalDiscountAmount, finalFreightAmount, goodsAmount.subtract(finalDiscountAmount).add(finalFreightAmount), tradeId);
         if (!reserveCoupons(user.userId(), tradeId, couponIds)) {
             throw new ResponseStatusException(CONFLICT, "selected coupon is no longer available");
         }
-        return new TradeView(tradeId, tradeNo, user.userId(), "PENDING_PAYMENT", goodsAmount, freightAmount, discountAmount,
-                goodsAmount.subtract(discountAmount).add(freightAmount), expiresAt, List.copyOf(orderNos));
+        return new TradeView(tradeId, tradeNo, user.userId(), "PENDING_PAYMENT", goodsAmount, finalFreightAmount, finalDiscountAmount,
+                goodsAmount.subtract(finalDiscountAmount).add(finalFreightAmount), expiresAt, List.copyOf(orderNos));
     }
 
     @Transactional("tradeTransactionManager")
@@ -249,10 +264,13 @@ public class TradeService {
             throw new ResponseStatusException(CONFLICT, "inventory reservation has expired");
         }
         List<Reservation> reservations = jdbcTemplate.query("""
-                SELECT id, order_id, order_item_id, product_id, batch_id, warehouse_id, reserved_grams FROM inventory_reservations
+                SELECT id, order_id, order_item_id, product_id, batch_id, warehouse_id, reserved_grams,
+                       batch_promotion_id, markdown_rate_snapshot, discount_amount FROM inventory_reservations
                 WHERE trade_id = ? AND status = 'ACTIVE' FOR UPDATE
                 """, (rs, row) -> new Reservation(rs.getLong("id"), rs.getLong("order_id"), rs.getLong("order_item_id"),
-                rs.getLong("product_id"), rs.getLong("batch_id"), rs.getLong("warehouse_id"), rs.getInt("reserved_grams")), trade.id());
+                rs.getLong("product_id"), rs.getLong("batch_id"), rs.getLong("warehouse_id"), rs.getInt("reserved_grams"),
+                (Long) rs.getObject("batch_promotion_id"), rs.getBigDecimal("markdown_rate_snapshot"),
+                rs.getBigDecimal("discount_amount")), trade.id());
         if (reservations.isEmpty()) {
             throw new ResponseStatusException(CONFLICT, "no active inventory reservation found");
         }
@@ -267,9 +285,11 @@ public class TradeService {
                 throw new ResponseStatusException(CONFLICT, "reserved inventory is no longer available");
             }
             jdbcTemplate.update("""
-                    INSERT INTO order_item_batch_allocations (order_item_id, batch_id, warehouse_id, allocated_grams)
-                    VALUES (?, ?, ?, ?)
-                    """, reservation.orderItemId(), reservation.batchId(), reservation.warehouseId(), reservation.grams());
+                    INSERT INTO order_item_batch_allocations (order_item_id, batch_id, warehouse_id, batch_promotion_id,
+                        markdown_rate_snapshot, allocated_grams, discount_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, reservation.orderItemId(), reservation.batchId(), reservation.warehouseId(),
+                    reservation.promotionId(), reservation.markdownRate(), reservation.grams(), reservation.discountAmount());
         }
         jdbcTemplate.update("UPDATE inventory_reservations SET status = 'CONSUMED' WHERE trade_id = ? AND status = 'ACTIVE'", trade.id());
         jdbcTemplate.update("UPDATE trade_orders SET status = 'PAID' WHERE id = ?", trade.id());
@@ -383,13 +403,21 @@ public class TradeService {
                 .stream().findFirst().orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "active product warehouse rule not found"));
     }
 
-    private void reserveBatches(long tradeId, long orderId, long orderItemId, long productId, long warehouseId, int grams, LocalDateTime expiresAt) {
+    private BigDecimal reserveBatches(long tradeId, long orderId, long orderItemId, long productId, long warehouseId,
+            int grams, BigDecimal userPricePerKilogram, LocalDateTime expiresAt) {
         int remaining = grams;
+        BigDecimal discountTotal = BigDecimal.ZERO;
         List<Batch> batches = jdbcTemplate.query("""
-                SELECT id, available_grams, reserved_grams FROM freshmart_merchant.inventory_batches
+                SELECT batch.id, batch.available_grams, batch.reserved_grams,
+                       promotion.id AS promotion_id, COALESCE(promotion.markdown_rate, 0) AS markdown_rate
+                FROM freshmart_merchant.inventory_batches batch
+                LEFT JOIN freshmart_merchant.batch_promotions promotion
+                  ON promotion.batch_id = batch.id AND promotion.status IN ('SCHEDULED', 'ACTIVE')
+                 AND promotion.starts_at <= CURRENT_TIMESTAMP AND promotion.ends_at > CURRENT_TIMESTAMP
                 WHERE product_id = ? AND warehouse_id = ? AND available_grams > reserved_grams
-                ORDER BY expires_on IS NULL, expires_on, id FOR UPDATE
-                """, (rs, row) -> new Batch(rs.getLong("id"), rs.getInt("available_grams"), rs.getInt("reserved_grams")), productId, warehouseId);
+                ORDER BY expires_on IS NULL, expires_on, batch.id FOR UPDATE
+                """, (rs, row) -> new Batch(rs.getLong("id"), rs.getInt("available_grams"), rs.getInt("reserved_grams"),
+                (Long) rs.getObject("promotion_id"), rs.getBigDecimal("markdown_rate")), productId, warehouseId);
         for (Batch batch : batches) {
             if (remaining == 0) {
                 break;
@@ -402,15 +430,27 @@ public class TradeService {
             if (updated == 0) {
                 throw new ResponseStatusException(CONFLICT, "inventory changed while reserving");
             }
+            BigDecimal batchDiscount = BatchPromotionPolicy.discountAmount(allocated, userPricePerKilogram, batch.markdownRate());
             jdbcTemplate.update("""
-                    INSERT INTO inventory_reservations (trade_id, order_id, order_item_id, product_id, batch_id, warehouse_id, reserved_grams, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, tradeId, orderId, orderItemId, productId, batch.id(), warehouseId, allocated, expiresAt);
+                    INSERT INTO inventory_reservations (trade_id, order_id, order_item_id, product_id, batch_id,
+                        batch_promotion_id, markdown_rate_snapshot, discount_amount, warehouse_id, reserved_grams, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, tradeId, orderId, orderItemId, productId, batch.id(), batch.promotionId(),
+                    batch.markdownRate(), batchDiscount, warehouseId, allocated, expiresAt);
+            discountTotal = discountTotal.add(batchDiscount);
             remaining -= allocated;
         }
         if (remaining > 0) {
             throw new ResponseStatusException(CONFLICT, "insufficient inventory");
         }
+        return discountTotal.setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal membershipRate(int points) {
+        return merchantJdbcTemplate.query("""
+                SELECT discount_rate FROM membership_levels WHERE status = 'ACTIVE' AND min_points <= ?
+                ORDER BY min_points DESC LIMIT 1
+                """, (rs, row) -> rs.getBigDecimal(1), points).stream().findFirst().orElse(BigDecimal.valueOf(100));
     }
 
     private TradeView requireOwnedPendingTrade(CurrentUser user, String tradeNo) {
@@ -479,11 +519,11 @@ public class TradeService {
     private record PricedLine(ProductWarehouse product, int weightGrams, MarketPriceSettlementPolicy.PriceBreakdown price) {
     }
 
-    private record Batch(long id, int availableGrams, int reservedGrams) {
+    private record Batch(long id, int availableGrams, int reservedGrams, Long promotionId, BigDecimal markdownRate) {
     }
 
     private record Reservation(long id, long orderId, long orderItemId, long productId, long batchId,
-            long warehouseId, int grams) {
+            long warehouseId, int grams, Long promotionId, BigDecimal markdownRate, BigDecimal discountAmount) {
     }
 
     private record Coupon(long id, Long merchantId, String couponType, BigDecimal thresholdAmount, BigDecimal discountAmount) {

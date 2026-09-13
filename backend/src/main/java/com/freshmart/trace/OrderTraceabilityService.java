@@ -43,8 +43,9 @@ public class OrderTraceabilityService {
         }
         List<Map<String, Object>> items = tradeJdbcTemplate.query("""
                 SELECT item.product_name_snapshot, item.weight_grams, item.user_price_per_kg,
-                       item.user_goods_amount, allocation.batch_id, allocation.allocated_grams,
-                       allocation.warehouse_id, batch.batch_no, batch.expires_on
+                       item.user_goods_amount, item.batch_promotion_discount_amount, allocation.batch_id, allocation.allocated_grams,
+                       allocation.warehouse_id, allocation.batch_promotion_id, allocation.markdown_rate_snapshot,
+                       allocation.discount_amount, batch.batch_no, batch.expires_on
                 FROM order_items item
                 LEFT JOIN order_item_batch_allocations allocation ON allocation.order_item_id = item.id
                 LEFT JOIN freshmart_merchant.inventory_batches batch ON batch.id = allocation.batch_id
@@ -55,10 +56,14 @@ public class OrderTraceabilityService {
                     item.put("weightGrams", rs.getInt("weight_grams"));
                     item.put("userPricePerKg", rs.getBigDecimal("user_price_per_kg"));
                     item.put("userGoodsAmount", rs.getBigDecimal("user_goods_amount"));
+                    item.put("batchPromotionDiscountAmount", rs.getBigDecimal("batch_promotion_discount_amount"));
                     item.put("batchId", rs.getObject("batch_id"));
                     item.put("batchNo", rs.getString("batch_no"));
                     item.put("allocatedGrams", rs.getObject("allocated_grams"));
                     item.put("warehouseId", rs.getObject("warehouse_id"));
+                    item.put("batchPromotionId", rs.getObject("batch_promotion_id"));
+                    item.put("markdownRate", rs.getBigDecimal("markdown_rate_snapshot"));
+                    item.put("batchPromotionDiscountAmount", rs.getBigDecimal("discount_amount"));
                     item.put("expiresOn", rs.getObject("expires_on", LocalDate.class));
                     return item;
                 }, orderId);
@@ -84,14 +89,17 @@ public class OrderTraceabilityService {
         requirePaidOrder(requireAccess(user, orderId));
         return tradeJdbcTemplate.query("""
                 SELECT item.product_name_snapshot, allocation.batch_id, batch.batch_no,
-                       allocation.warehouse_id, allocation.allocated_grams, batch.expires_on
+                       allocation.warehouse_id, allocation.allocated_grams, allocation.batch_promotion_id,
+                       allocation.markdown_rate_snapshot, allocation.discount_amount, batch.expires_on
                 FROM order_items item
                 LEFT JOIN order_item_batch_allocations allocation ON allocation.order_item_id = item.id
                 LEFT JOIN freshmart_merchant.inventory_batches batch ON batch.id = allocation.batch_id
                 WHERE item.order_id = ? ORDER BY item.id, allocation.batch_id
                 """, (rs, row) -> new TraceView(rs.getString("product_name_snapshot"),
                 (Long) rs.getObject("batch_id"), rs.getString("batch_no"), (Long) rs.getObject("warehouse_id"),
-                (Integer) rs.getObject("allocated_grams"), rs.getObject("expires_on", LocalDate.class)), orderId);
+                (Integer) rs.getObject("allocated_grams"), (Long) rs.getObject("batch_promotion_id"),
+                rs.getBigDecimal("markdown_rate_snapshot"), rs.getBigDecimal("discount_amount"),
+                rs.getObject("expires_on", LocalDate.class)), orderId);
     }
 
     private OrderAccess requireAccess(CurrentUser user, long orderId) {
@@ -137,6 +145,7 @@ public class OrderTraceabilityService {
     }
 
     public record TraceView(String productName, Long batchId, String batchNo, Long warehouseId,
-            Integer allocatedGrams, LocalDate expiresOn) {
+            Integer allocatedGrams, Long batchPromotionId, java.math.BigDecimal markdownRate,
+            java.math.BigDecimal discountAmount, LocalDate expiresOn) {
     }
 }
