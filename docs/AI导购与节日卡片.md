@@ -42,6 +42,8 @@ sequenceDiagram
 
 卡片基于 `backend/src/main/resources/ai/card-templates/seasonal-recommendation.svg`，仅允许替换标题、描述和节气标签等文本占位符。渲染器必须对文本做 XML 转义并限制长度，不允许模型返回 SVG 标签、脚本、外部链接或任意样式。首期输出为站内消息卡片；其他发送渠道待确认。
 
+消费者可通过 `/api/notification-preferences` 关闭或重新开启节气/节日卡片推送。管理员可创建定时任务，系统每分钟扫描到期任务，仅向有近期有效会话且未关闭节日卡片通知的消费者投递。任务键和任务-用户组合均有唯一约束，失败投递可由下一轮扫描或管理员手动重试，重复执行不会生成重复站内消息。任务状态为 `PENDING`、`RUNNING`、`FAILED` 或 `COMPLETED`；投递记录状态为 `PENDING`、`PROCESSING`、`FAILED` 或 `SENT`。系统调度只负责消息投递和审计，不修改订单、库存、支付或退款状态。
+
 ## 导购接口草案
 
 | 方法 | 路径 | 权限 | 说明 |
