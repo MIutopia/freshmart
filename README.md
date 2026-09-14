@@ -65,7 +65,7 @@ freshmart/
 │   │   └── e2e-smoke.ps1                   端到端测试脚本
 │   ├── src/main/java/com/freshmart/        91 个 Java 文件
 │   ├── src/main/resources/db/migration/    47 个 Flyway 迁移
-│   └── src/test/java/                      16 个测试类
+│   └── src/test/java/                      20 个测试类（16 策略 + 4 一致性实验）
 ├── frontend/
 │   └── src/
 │       ├── api/               接口封装
@@ -73,7 +73,7 @@ freshmart/
 │       ├── router/            路由与导航
 │       ├── stores/            状态管理
 │       └── views/             34 个页面，按 app / merchant / delivery / admin 分目录
-└── docs/                      23 份设计与规则文档
+└── docs/                      27 份设计与规则文档
 ```
 
 ---
@@ -185,7 +185,7 @@ npm run dev
 
 ### 单元测试
 
-16 个测试类覆盖价格、运费、积分、促销、结算、称重与仓储边界等**纯函数策略**：
+16 个测试类覆盖价格、运费、积分、促销、结算、称重与仓储边界等**纯函数策略**（另有 4 个一致性实验类见下）：
 
 ```bash
 cd backend
