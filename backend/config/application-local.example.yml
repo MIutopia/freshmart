@@ -1,0 +1,15 @@
+db:
+  username: freshmart
+  password: "replace-with-your-local-database-password"
+ai:
+  deepseek:
+    api-key: "replace-with-your-deepseek-api-key"
+    base-url: https://api.deepseek.com
+    model: deepseek-chat
+    timeout-seconds: 15
+commerce:
+  payment:
+    provider: PERSONAL_WECHAT_QR
+    mode: MANUAL_CONFIRMATION
+    personal-wechat-qr-url: /public/payment-qr
+    personal-wechat-qr-file: C:/absolute/path/to/personal-wechat-qr.jpg
