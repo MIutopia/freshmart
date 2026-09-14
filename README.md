@@ -276,9 +276,4 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
 - 端到端测试为顺序执行，不覆盖并发场景
 - 服务层与持久层缺少单元测试，中间层依赖端到端测试覆盖
 - 媒体文件存本地磁盘，多实例部署前需替换为对象存储
-
----
-
-## 十二、自动构建与部署
-
-GitHub Actions 在 Pull Request 与 `main` 分支推送时自动构建并测试后端与前端。生产发布通过 GitHub Environment 的显式开关与 SSH 密钥配置执行，详见 `docs/CI-CD部署说明.md`。
+- 未接入持续集成与自动化部署，构建、测试与发布均在本机手工执行
