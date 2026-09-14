@@ -73,7 +73,7 @@ freshmart/
 │       ├── router/            路由与导航
 │       ├── stores/            状态管理
 │       └── views/             34 个页面，按 app / merchant / delivery / admin 分目录
-└── docs/                      27 份设计与规则文档
+└── docs/                      26 份设计与规则文档
 ```
 
 ---
