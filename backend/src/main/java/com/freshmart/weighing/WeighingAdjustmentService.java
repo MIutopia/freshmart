@@ -268,6 +268,11 @@ public class WeighingAdjustmentService {
     }
 
     private void settle(OrderSnapshot order, WeighingSettlementPolicy.Settlement settlement, String adjustmentId) {
+        // 金额无差额时不存在资金动作：既不退款也不记账，避免产生 0 元流水与无谓的钱包依赖
+        if (settlement.refundAmount().signum() == 0 && settlement.absorbedAmount().signum() == 0) {
+            markSettled(order.id(), "WEIGH-NO-DIFF-" + order.id());
+            return;
+        }
         if (settlement.action() == WeighingSettlementPolicy.SettlementAction.REFUND_USER) {
             String reference = "WEIGH-REFUND-" + order.id();
             userJdbcTemplate.update("""
