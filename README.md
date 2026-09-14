@@ -251,7 +251,10 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
 | `docs/本地测试账号.md` | 测试账号说明 |
 | `docs/项目过程总览.md` | 进度与待办 |
 | `docs/开发变更日志.md` | 逐条变更记录 |
-| `docs/实验设计方案.md` | 一致性验证的实验设计 |
+| `docs/实验设计方案.md` | 一致性验证的实验设计（不变式 I1–I7 与 E1–E5） |
+| `docs/实验报告.md` | E1/E2/E3 的实验结果与关键发现 |
+| `docs/论文初稿.md` | 论文初稿（Markdown 版，六章） |
+| `docs/论文初稿.docx` | 论文初稿（Word 版，由脚本生成） |
 | `docs/项目完成度评估报告.docx` | 完成度评估 |
 
 ---
