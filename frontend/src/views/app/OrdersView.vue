@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { orderApi, type OrderView } from '../../api/trade'
 import { errorMessage } from '../../api/http'
+import { ORDER_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const orders = ref<OrderView[]>([])
 const loading = ref(false)
@@ -17,12 +18,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function statusTagType(status: string) {
-  if (['CANCELLED', 'REFUNDED', 'REFUND_SUCCESS'].includes(status)) return 'info'
-  if (['DELIVERED', 'COMPLETED'].includes(status)) return 'success'
-  return 'warning'
 }
 
 onMounted(load)
@@ -50,7 +45,9 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="130">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
+            <el-tag :type="tagTypeOf(ORDER_STATUS, row.status)" size="small" effect="light">
+              {{ labelOf(ORDER_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="商品金额" width="100">

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { orderApi, type OrderView } from '../../api/trade'
 import { errorMessage } from '../../api/http'
+import { ORDER_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const route = useRoute()
 const orderId = Number(route.params.orderId)
@@ -60,7 +61,9 @@ onMounted(load)
       <template #header>
         <div class="order-detail__header">
           <span class="order-detail__no">{{ order.orderNo }}</span>
-          <el-tag size="small" effect="light" type="warning">{{ order.status }}</el-tag>
+          <el-tag size="small" effect="light" :type="tagTypeOf(ORDER_STATUS, order.status)">
+            {{ labelOf(ORDER_STATUS, order.status) }}
+          </el-tag>
         </div>
       </template>
 

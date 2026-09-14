@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { merchantApi, type MerchantSettlement } from '../../api/merchant'
 import { errorMessage } from '../../api/http'
+import { SETTLEMENT_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const settlements = ref<MerchantSettlement[]>([])
 const loading = ref(false)
@@ -17,12 +18,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function statusTagType(status: string) {
-  if (status === 'SETTLED') return 'success'
-  if (status === 'REVERSED') return 'danger'
-  return 'warning'
 }
 
 onMounted(load)
@@ -65,7 +60,9 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
+            <el-tag :type="tagTypeOf(SETTLEMENT_STATUS, row.status)" size="small" effect="light">
+              {{ labelOf(SETTLEMENT_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="结算备注" min-width="150">

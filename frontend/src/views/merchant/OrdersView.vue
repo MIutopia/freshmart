@@ -5,6 +5,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { orderApi, type OrderView } from '../../api/trade'
 import { weighingApi, type WeighingSheet } from '../../api/weighing'
 import { errorMessage } from '../../api/http'
+import { ORDER_STATUS, WEIGHING_ACTION, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const orders = ref<OrderView[]>([])
 const loading = ref(false)
@@ -107,7 +108,7 @@ async function submitWeigh() {
     const gramsHint = result.inventoryAdjustGrams === 0
       ? '未调整库存'
       : `库存差额 ${result.inventoryAdjustGrams} 克`
-    ElMessage.success(`称重已提交：${result.action}，${gramsHint}`)
+    ElMessage.success(`称重已提交：${labelOf(WEIGHING_ACTION, result.action)}，${gramsHint}`)
     weighVisible.value = false
     await load()
   } catch (error) {
@@ -144,7 +145,9 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="130">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" type="warning">{{ row.status }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(ORDER_STATUS, row.status)">
+              {{ labelOf(ORDER_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="应付" width="100">

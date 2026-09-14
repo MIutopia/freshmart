@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { mediaApi, refundApi, type RefundView } from '../../api/afterSale'
 import { errorMessage } from '../../api/http'
+import { REFUND_ISSUE_TYPE, REFUND_STATUS, labelOf, optionsOf, tagTypeOf } from '../../constants/dictionaries'
 
 /** 后端 RefundRequest 只接受 orderId / issueType / description / evidenceImages */
 const form = ref({ orderId: '', issueType: 'OUT_OF_STOCK', description: '' })
@@ -13,11 +14,8 @@ const loading = ref(false)
 const submitting = ref(false)
 const uploading = ref(false)
 
-const ISSUE_OPTIONS = [
-  { label: '缺货', value: 'OUT_OF_STOCK' },
-  { label: '品质问题', value: 'QUALITY' },
-  { label: '其他', value: 'OTHER' }
-]
+/** 后端 RefundService 只接受缺货与品质问题；运输损坏作为品质问题的证据类型，不单列 */
+const ISSUE_OPTIONS = optionsOf(REFUND_ISSUE_TYPE)
 
 async function loadRefunds() {
   loading.value = true
@@ -71,11 +69,7 @@ async function submit() {
   }
 }
 
-function statusTagType(status: string) {
-  if (['REFUND_SUCCESS', 'MANUAL_REFUND_COMPLETED'].includes(status)) return 'success'
-  if (['REFUND_FAIL', 'REJECTED'].includes(status)) return 'danger'
-  return 'warning'
-}
+
 
 onMounted(loadRefunds)
 </script>
@@ -133,7 +127,7 @@ onMounted(loadRefunds)
           <el-table-column prop="orderId" label="订单" width="80" />
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
-              {{ ISSUE_OPTIONS.find((item) => item.value === row.issueType)?.label ?? row.issueType }}
+              {{ labelOf(REFUND_ISSUE_TYPE, row.issueType) }}
             </template>
           </el-table-column>
           <el-table-column label="金额" width="90">
@@ -141,7 +135,9 @@ onMounted(loadRefunds)
           </el-table-column>
           <el-table-column label="状态" width="120">
             <template #default="{ row }">
-              <el-tag :type="statusTagType(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
+              <el-tag :type="tagTypeOf(REFUND_STATUS, row.status)" size="small" effect="light">
+                {{ labelOf(REFUND_STATUS, row.status) }}
+              </el-tag>
             </template>
           </el-table-column>
           <template #empty>暂无售后记录</template>

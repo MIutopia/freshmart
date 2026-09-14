@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { DELIVERY_TASK_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 import type { DeliveryTask } from '../../api/delivery'
 
 const tasks = ref<DeliveryTask[]>([])
@@ -61,11 +62,7 @@ async function confirmAssign() {
   }
 }
 
-function statusTagType(value: string) {
-  if (value === 'DELIVERED') return 'success'
-  if (value === 'WAITING_ASSIGNMENT') return 'warning'
-  return 'info'
-}
+
 
 onMounted(load)
 </script>
@@ -92,7 +89,9 @@ onMounted(load)
         <el-table-column prop="deliveryZoneId" label="区域" width="90" />
         <el-table-column label="状态" width="170">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(DELIVERY_TASK_STATUS, row.status)">
+              {{ labelOf(DELIVERY_TASK_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="接单截止" min-width="160">

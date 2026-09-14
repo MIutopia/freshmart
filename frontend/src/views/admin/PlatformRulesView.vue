@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi, type PlatformRule } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { VALUE_TYPE, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const rules = ref<PlatformRule[]>([])
 const drafts = ref<Record<string, string>>({})
@@ -63,7 +64,9 @@ onMounted(load)
         <el-table-column prop="description" label="说明" min-width="220" />
         <el-table-column label="类型" width="110">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain" type="info">{{ row.valueType }}</el-tag>
+            <el-tag size="small" effect="plain" :type="tagTypeOf(VALUE_TYPE, row.valueType)">
+              {{ labelOf(VALUE_TYPE, row.valueType) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="值" width="220">

@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { deliveryApi, type DeliveryTask } from '../../api/delivery'
 import { errorMessage } from '../../api/http'
+import { DELIVERY_TASK_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const tasks = ref<DeliveryTask[]>([])
 const loading = ref(false)
@@ -87,7 +88,9 @@ onMounted(load)
         <el-table-column prop="merchantId" label="商家" width="90" />
         <el-table-column label="状态" width="140">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" type="warning">{{ row.status }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(DELIVERY_TASK_STATUS, row.status)">
+              {{ labelOf(DELIVERY_TASK_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="接单截止" min-width="160">

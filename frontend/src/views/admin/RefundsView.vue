@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { REFUND_ISSUE_TYPE, REFUND_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 import type { RefundSuggestionView, RefundView } from '../../api/afterSale'
 
 const refunds = ref<RefundView[]>([])
@@ -102,11 +103,7 @@ async function loadSuggestion(row: RefundView) {
   }
 }
 
-function statusTagType(value: string) {
-  if (['REFUND_SUCCESS', 'MANUAL_REFUND_COMPLETED'].includes(value)) return 'success'
-  if (['REFUND_FAIL', 'REJECTED'].includes(value)) return 'danger'
-  return 'warning'
-}
+
 
 onMounted(load)
 </script>
@@ -133,7 +130,9 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="180">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(REFUND_STATUS, row.status)">
+              {{ labelOf(REFUND_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="330" fixed="right">

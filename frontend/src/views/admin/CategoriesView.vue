@@ -4,12 +4,11 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi, type CategoryView } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { ACTIVE_STATUS, PRODUCT_SCOPE, labelOf, optionsOf, tagTypeOf } from '../../constants/dictionaries'
 
-const SCOPE_OPTIONS = [
-  { value: 'FRUIT', label: '水果 FRUIT' },
-  { value: 'VEGETABLE', label: '蔬菜 VEGETABLE' },
-  { value: 'OTHER', label: '其他 OTHER' }
-]
+/** 品类同时决定售后窗口，取值与后端 CatalogService 校验一致 */
+const SCOPE_OPTIONS = optionsOf(PRODUCT_SCOPE)
+const STATUS_OPTIONS = optionsOf(ACTIVE_STATUS)
 
 const categories = ref<CategoryView[]>([])
 const loading = ref(false)
@@ -158,7 +157,9 @@ onMounted(load)
           <el-table-column prop="name" label="名称" min-width="130" />
           <el-table-column label="品类" width="110">
             <template #default="{ row }">
-              <el-tag size="small" effect="plain">{{ row.productScope }}</el-tag>
+              <el-tag size="small" effect="plain" :type="tagTypeOf(PRODUCT_SCOPE, row.productScope)">
+                {{ labelOf(PRODUCT_SCOPE, row.productScope) }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column label="父分类" width="90">
@@ -167,8 +168,8 @@ onMounted(load)
           <el-table-column prop="sortOrder" label="排序" width="80" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag size="small" effect="light" :type="row.status === 'ACTIVE' ? 'success' : 'info'">
-                {{ row.status }}
+              <el-tag size="small" effect="light" :type="tagTypeOf(ACTIVE_STATUS, row.status)">
+                {{ labelOf(ACTIVE_STATUS, row.status) }}
               </el-tag>
             </template>
           </el-table-column>
@@ -205,8 +206,7 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="editForm.status">
-            <el-option label="启用 ACTIVE" value="ACTIVE" />
-            <el-option label="停用 INACTIVE" value="INACTIVE" />
+            <el-option v-for="item in STATUS_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
       </el-form>

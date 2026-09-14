@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { holidayCardApi, notificationPreferenceApi, type HolidayCardPreview } from '../../api/afterSale'
 import { errorMessage } from '../../api/http'
+import { ROLE, labelOf } from '../../constants/dictionaries'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -72,7 +73,7 @@ onMounted(async () => {
           <el-descriptions-item label="登录名">{{ auth.loginName }}</el-descriptions-item>
           <el-descriptions-item label="角色">
             <el-tag v-for="role in auth.roles" :key="role" size="small" effect="light" class="profile__role">
-              {{ role }}
+              {{ labelOf(ROLE, role) }}
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>

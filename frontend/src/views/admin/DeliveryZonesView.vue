@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi, type DeliveryZoneView } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { ACTIVE_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const zones = ref<DeliveryZoneView[]>([])
 const loading = ref(false)
@@ -85,8 +86,8 @@ onMounted(load)
           <el-table-column prop="areaCode" label="编码" width="130" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag size="small" effect="light" :type="row.status === 'ACTIVE' ? 'success' : 'info'">
-                {{ row.status }}
+              <el-tag size="small" effect="light" :type="tagTypeOf(ACTIVE_STATUS, row.status)">
+                {{ labelOf(ACTIVE_STATUS, row.status) }}
               </el-tag>
             </template>
           </el-table-column>

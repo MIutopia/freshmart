@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { MERCHANT_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 import type { MerchantApplication } from '../../api/merchant'
 
 const applications = ref<MerchantApplication[]>([])
@@ -58,11 +59,7 @@ async function confirmReview() {
   }
 }
 
-function statusTagType(status: string) {
-  if (status === 'APPROVED') return 'success'
-  if (status === 'REJECTED') return 'danger'
-  return 'warning'
-}
+
 
 onMounted(load)
 </script>
@@ -97,7 +94,9 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(MERCHANT_STATUS, row.status)">
+              {{ labelOf(MERCHANT_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">

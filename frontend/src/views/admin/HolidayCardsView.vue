@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { HOLIDAY_TASK_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 interface HolidayCardTask {
   id: number
@@ -72,12 +73,7 @@ async function runTask(taskId: number) {
   }
 }
 
-function statusTagType(status?: string) {
-  if (status === 'COMPLETED') return 'success'
-  if (status === 'FAILED') return 'danger'
-  if (status === 'RUNNING') return 'warning'
-  return 'info'
-}
+
 
 onMounted(load)
 </script>
@@ -122,7 +118,9 @@ onMounted(load)
         <el-table-column prop="holidayKey" label="节日" width="120" />
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" :type="statusTagType(row.status)">{{ row.status ?? '—' }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(HOLIDAY_TASK_STATUS, row.status)">
+              {{ labelOf(HOLIDAY_TASK_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="投递统计" width="150">

@@ -4,6 +4,9 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '../../api/admin'
 import { errorMessage } from '../../api/http'
+import { RECONCILIATION_STATUS, labelOf, optionsOf, tagTypeOf } from '../../constants/dictionaries'
+
+const RECONCILIATION_OPTIONS = optionsOf(RECONCILIATION_STATUS)
 import type { ReconciliationDifferenceView } from '../../api/trade'
 
 const differences = ref<ReconciliationDifferenceView[]>([])
@@ -67,11 +70,7 @@ async function confirmAction() {
   }
 }
 
-function statusTagType(value: string) {
-  if (value === 'HANDLED') return 'success'
-  if (value === 'PENDING_SHELVE') return 'info'
-  return 'warning'
-}
+
 
 const ACTION_TITLE: Record<'claim' | 'shelve' | 'resolve', string> = {
   claim: '认领对账差异',
@@ -86,16 +85,18 @@ onMounted(load)
   <section class="payments">
     <header class="page-head">
       <h2>支付核验与对账</h2>
-      <span class="sub">差异流转：UNHANDLED → HANDLING → HANDLED，也可暂存为 PENDING_SHELVE</span>
+      <span class="sub">对账差异按「未处理 → 处理中 → 已处理」流转，也可先暂存待后续跟进</span>
     </header>
 
     <div class="payments__toolbar">
       <el-select v-model="status" class="payments__filter" @change="load">
         <el-option label="全部" value="" />
-        <el-option label="未处理 UNHANDLED" value="UNHANDLED" />
-        <el-option label="处理中 HANDLING" value="HANDLING" />
-        <el-option label="已暂存 PENDING_SHELVE" value="PENDING_SHELVE" />
-        <el-option label="已处理 HANDLED" value="HANDLED" />
+        <el-option
+          v-for="item in RECONCILIATION_OPTIONS"
+          :key="item.value"
+          :label="item.label"
+          :value="item.value"
+        />
       </el-select>
       <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
     </div>
@@ -108,7 +109,9 @@ onMounted(load)
         <el-table-column prop="description" label="说明" min-width="200" />
         <el-table-column label="状态" width="140">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+            <el-tag size="small" effect="light" :type="tagTypeOf(RECONCILIATION_STATUS, row.status)">
+              {{ labelOf(RECONCILIATION_STATUS, row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="认领人" width="90">

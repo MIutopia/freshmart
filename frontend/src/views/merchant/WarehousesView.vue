@@ -5,6 +5,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { catalogApi } from '../../api/catalog'
 import { merchantApi, type MerchantWarehouse } from '../../api/merchant'
 import { errorMessage } from '../../api/http'
+import { ACTIVE_STATUS, labelOf, tagTypeOf } from '../../constants/dictionaries'
 
 const warehouses = ref<MerchantWarehouse[]>([])
 const loading = ref(false)
@@ -131,8 +132,8 @@ onMounted(load)
         <el-table-column prop="address" label="地址" min-width="150" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag size="small" effect="light" :type="row.status === 'ACTIVE' ? 'success' : 'info'">
-              {{ row.status }}
+            <el-tag size="small" effect="light" :type="tagTypeOf(ACTIVE_STATUS, row.status)">
+              {{ labelOf(ACTIVE_STATUS, row.status) }}
             </el-tag>
           </template>
         </el-table-column>
