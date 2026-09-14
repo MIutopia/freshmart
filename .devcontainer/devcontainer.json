@@ -1,0 +1,50 @@
+{
+  "name": "FreshMart 生鲜配送商城",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "installMaven": true,
+      "mavenVersion": "3.9.11"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vmware.vscode-boot-dev-pack",
+        "vue.volar",
+        "dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "java.configuration.updateBuildConfiguration": "automatic",
+        "java.compile.nullAnalysis.mode": "disabled",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  "forwardPorts": [5173, 8080],
+  "portsAttributes": {
+    "5173": {
+      "label": "前端页面（打开这个）",
+      "onAutoForward": "openPreview",
+      "visibility": "public"
+    },
+    "8080": {
+      "label": "后端 API",
+      "onAutoForward": "silent",
+      "visibility": "private"
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start-services.sh",
+
+  "remoteUser": "vscode"
+}

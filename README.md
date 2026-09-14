@@ -56,6 +56,7 @@
 
 ```text
 freshmart/
+├── .devcontainer/             Codespaces 配置（容器定义与初始化、启动脚本）
 ├── backend/
 │   ├── config/                本地配置（application-local.yml，不入 Git）
 │   ├── data/                  媒体文件落盘目录
@@ -163,6 +164,41 @@ npm run dev
 | 商家端 | `/merchant` |
 | 配送端 | `/delivery` |
 | 管理后台 | `/admin` |
+
+### 5. 在 GitHub Codespaces 中运行（无需本机安装任何环境）
+
+仓库已内置 `.devcontainer/` 配置，可在浏览器内直接运行完整系统（含 MySQL、后端与前端），**本机只需一个浏览器**。
+
+**步骤**
+
+1. 在仓库页面点击 `Code` → `Codespaces` → `Create codespace on main`；
+2. 首次创建约需 3–5 分钟，容器会自动完成：安装 JDK 17、Node 20、Maven、MySQL 8，创建六个数据库，安装前后端依赖（由 `.devcontainer/setup.sh` 执行）；
+3. 在终端执行一键启动：
+
+```bash
+bash .devcontainer/dev.sh
+```
+
+4. 脚本会等待后端就绪，然后提示打开前端地址。在 VS Code 的「端口」面板中找到 **5173**，点击地球图标打开即可看到登录页。
+
+**为什么不会遇到跨域问题**：前端与后端运行在同一容器内，Vite 通过代理把 `/api` 转发到本机 `8080`，浏览器始终只访问 5173 这一个来源，因此无需修改后端的 CORS 白名单。
+
+**关于容器内的数据库凭据**：`.devcontainer/setup.sh` 使用固定的本地开发密码（`freshmart-dev`），它只在临时沙箱内部可达、不含任何真实数据，与「生产凭据不入库」的约定不冲突。生产数据库、支付密钥与 AI 密钥仍只通过环境变量或本地配置注入。
+
+**常用操作**
+
+```bash
+# 查看后端日志
+tail -f work/boot-8080.log
+
+# 停止服务
+pkill -f spring-boot:run && pkill -f "vite"
+
+# 重新导入测试数据（会清空业务数据）
+mysql -h 127.0.0.1 -u root -pfreshmart-dev < backend/scripts/bootstrap-domain-databases.sql
+```
+
+**免费额度提示**：Codespaces 免费账户每月约有 60–120 核心小时。停止（Stop）而不删除（Delete）时磁盘内容保留，下次启动只需重跑 `bash .devcontainer/dev.sh`。
 
 ---
 
