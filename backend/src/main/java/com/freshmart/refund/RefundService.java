@@ -9,7 +9,10 @@ import com.freshmart.payment.PaymentAdapterFactory;
 import com.freshmart.payment.FinancialStatusLogService;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -236,18 +239,72 @@ public class RefundService {
             throw new ResponseStatusException(CONFLICT, "inventory disposition has already been processed");
         }
         if ("RESTOCKED".equals(disposition)) {
-            List<BatchQuantity> batches = tradeJdbcTemplate.query("SELECT allocation.batch_id, allocation.warehouse_id, SUM(allocation.allocated_grams) FROM order_item_batch_allocations allocation JOIN order_items item ON item.id = allocation.order_item_id WHERE item.order_id = ? GROUP BY allocation.batch_id, allocation.warehouse_id",
-                    (rs, row) -> new BatchQuantity(rs.getLong(1), rs.getLong(2), rs.getInt(3)), refund.orderId());
-            for (BatchQuantity batch : batches) {
-                if (tradeJdbcTemplate.update("UPDATE freshmart_merchant.inventory_batches SET available_grams = available_grams + ? WHERE id = ? AND warehouse_id = ?", batch.grams(), batch.batchId(), batch.warehouseId()) == 0) {
-                    throw new ResponseStatusException(CONFLICT, "inventory batch no longer exists");
-                }
-            }
+            restockOrderBatches(refund.orderId());
         }
         String cleanNote = note == null ? null : note.trim();
         tradeJdbcTemplate.update("UPDATE refund_inventory_dispositions SET disposition = ?, processed_by = ?, processed_at = CURRENT_TIMESTAMP, processing_note = ? WHERE id = ? AND disposition = 'PENDING_INSPECTION'", disposition, operator.userId(), cleanNote, current.id());
         statusLogService.record("REFUND_INVENTORY", refundNo, "PENDING_INSPECTION", disposition, "REFUND_INVENTORY_DISPOSITION_PROCESSED", operator.userId(), cleanNote, "MANUAL");
         return new InventoryDispositionView(refundNo, refund.orderId(), disposition, current.reason(), operator.userId(), LocalDateTime.now(), cleanNote);
+    }
+
+    /**
+     * 退货回库：以实际出库克数回补批次。逐项称重过的订单项按实际净重回补，未称重的回落到预占克数，
+     * 否则实重与预估不一致时会造成批次账实偏离。同一订单项跨多个批次时按各自预占克数比例分摊，
+     * 最后一批兜底剩余，避免逐项抹零；同一批次的多项回补在内存中合并后只写一次。
+     */
+    private void restockOrderBatches(long orderId) {
+        List<RestockAllocation> allocations = tradeJdbcTemplate.query("""
+                SELECT allocation.batch_id, allocation.warehouse_id, allocation.order_item_id,
+                       allocation.allocated_grams, item.actual_weight_grams
+                FROM order_item_batch_allocations allocation
+                JOIN order_items item ON item.id = allocation.order_item_id
+                WHERE item.order_id = ?
+                ORDER BY allocation.order_item_id, allocation.batch_id
+                """, (rs, row) -> new RestockAllocation(rs.getLong("batch_id"), rs.getLong("warehouse_id"),
+                rs.getLong("order_item_id"), rs.getInt("allocated_grams"),
+                (Integer) rs.getObject("actual_weight_grams")), orderId);
+        if (allocations.isEmpty()) {
+            return;
+        }
+        Map<Long, List<RestockAllocation>> byItem = new LinkedHashMap<>();
+        for (RestockAllocation allocation : allocations) {
+            byItem.computeIfAbsent(allocation.orderItemId(), key -> new ArrayList<>()).add(allocation);
+        }
+        Map<String, RestockTarget> targets = new LinkedHashMap<>();
+        for (List<RestockAllocation> itemAllocations : byItem.values()) {
+            int allocatedTotal = itemAllocations.stream().mapToInt(RestockAllocation::allocatedGrams).sum();
+            if (allocatedTotal <= 0) {
+                continue;
+            }
+            Integer actualWeight = itemAllocations.get(0).actualWeightGrams();
+            int effectiveGrams = actualWeight != null && actualWeight > 0 ? actualWeight : allocatedTotal;
+            if (effectiveGrams <= 0) {
+                continue;
+            }
+            int remaining = effectiveGrams;
+            for (int index = 0; index < itemAllocations.size(); index++) {
+                RestockAllocation allocation = itemAllocations.get(index);
+                int share = index == itemAllocations.size() - 1
+                        ? remaining
+                        : (int) Math.round((double) allocation.allocatedGrams() / allocatedTotal * effectiveGrams);
+                share = Math.min(share, remaining);
+                if (share <= 0) {
+                    continue;
+                }
+                String key = allocation.batchId() + ":" + allocation.warehouseId();
+                targets.merge(key, new RestockTarget(allocation.batchId(), allocation.warehouseId(), share),
+                        (left, right) -> new RestockTarget(left.batchId(), left.warehouseId(), left.grams() + right.grams()));
+                remaining -= share;
+            }
+        }
+        for (RestockTarget target : targets.values()) {
+            if (tradeJdbcTemplate.update("""
+                    UPDATE freshmart_merchant.inventory_batches SET available_grams = available_grams + ?
+                    WHERE id = ? AND warehouse_id = ?
+                    """, target.grams(), target.batchId(), target.warehouseId()) == 0) {
+                throw new ResponseStatusException(CONFLICT, "inventory batch no longer exists");
+            }
+        }
     }
 
     private void completeRefund(RefundDetail refund, String reviewNote, long operatorId) {
@@ -400,7 +457,9 @@ public class RefundService {
     private record OrderPayment(long id, BigDecimal amount, long userId, long paymentId) {
     }
 
-    private record BatchQuantity(long batchId, long warehouseId, int grams) { }
+    private record RestockAllocation(long batchId, long warehouseId, long orderItemId, int allocatedGrams,
+            Integer actualWeightGrams) { }
+    private record RestockTarget(long batchId, long warehouseId, int grams) { }
     private record InventoryDisposition(long id, long orderId, String disposition, String reason) { }
 
     private record RefundDetail(long id, String refundNo, long orderId, String issueType, BigDecimal amount, String status,

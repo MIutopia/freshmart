@@ -282,6 +282,18 @@ if ($deliveredOrder) {
         Report 'refund appears in admin list' (@($adminRefunds | Where-Object { $_.refundNo -eq $refund.refundNo }).Count -gt 0) 'refund not found in admin list'
         Invoke-Step 'refund ai suggestion' { ApiSend 'POST' ("/api/admin/refunds/" + $refund.refundNo + "/ai-review-suggestion") $adminToken $null } | Out-Null
         Invoke-Step 'review refund' { ApiSend 'PUT' ("/api/admin/refunds/" + $refund.id + "/review") $adminToken @{ approved = $true; reviewNote = 'E2E review approved' } } | Out-Null
+        # 个人收款码退款走人工退款工单：必须先完成退款，才会生成库存处置单
+        Invoke-Step 'complete manual refund' { ApiSend 'POST' ("/api/admin/refunds/" + $refund.refundNo + "/manual-complete") $adminToken $null } | Out-Null
+        # 该订单已逐项/整单称重过，回库量应取实际出库克数而非预占克数
+        $disposition = Invoke-Step 'process inventory disposition' {
+            ApiSend 'PUT' ("/api/admin/refunds/" + $refund.refundNo + "/inventory-disposition") $adminToken @{ disposition = 'RESTOCKED'; note = 'E2E restock by actual grams' }
+        }
+        if ($disposition) {
+            Report 'inventory restocked' ($disposition.disposition -eq 'RESTOCKED') ('disposition = ' + $disposition.disposition)
+        }
+        Invoke-ExpectFailure 'inventory disposition cannot be processed twice' {
+            ApiSend 'PUT' ("/api/admin/refunds/" + $refund.refundNo + "/inventory-disposition") $adminToken @{ disposition = 'RESTOCKED'; note = 'E2E restock again' }
+        }
     }
 }
 
